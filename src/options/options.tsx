@@ -104,9 +104,25 @@ export const OptionsPage = () => {
               }
             />
             <FormControl.Caption>
-              Used to authenticate requests to the GitHub API. <br /> Generate a token with <code>Pull Request</code> scope from your <Link href="https://github.com/settings/personal-access-tokens" target="_blank" rel="noopener noreferrer">GitHub settings</Link       >.
+              Used to authenticate requests to the GitHub API.{" "}
+              Generate a token from your{" "}
+              <Link href="https://github.com/settings/tokens/new?scopes=repo" target="_blank" rel="noopener noreferrer">
+                GitHub settings.
+              </Link>
             </FormControl.Caption>
           </FormControl>
+            <aside style={{
+              marginTop: 8,
+              padding: "8px 12px",
+              borderRadius: 6,
+              background: "var(--bgColor-muted)",
+              borderLeft: "3px solid var(--borderColor-muted)",
+              fontSize: "var(--text-body-size-small)",
+              lineHeight: 1.6,
+            }}>
+              <strong>Classic PAT</strong> — use the <code>repo</code> scope. Required for SSO-protected orgs (authorize per org via <em>Configure SSO</em> on the token page).<br />
+              <strong>Fine-grained PAT</strong> — set <em>Resource owner</em> to the org, grant <em>Pull requests: Read</em>. Not supported by all orgs.
+            </aside>
 
           <FormControl>
             <FormControl.Label>Repositories to check</FormControl.Label>

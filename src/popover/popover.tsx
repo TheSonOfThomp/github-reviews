@@ -10,21 +10,24 @@ import {
   Link,
   Spinner,
   Stack,
+  IconButton,
 } from "@primer/react";
-import { GearIcon, GitPullRequestIcon, GitPullRequestDraftIcon } from "@primer/octicons-react";
-import type { PullRequest } from "../background/fetchPullRequests";
+import { GearIcon, GitPullRequestIcon, GitPullRequestDraftIcon, SyncIcon } from "@primer/octicons-react";
+import type { PullRequest, RepoError } from "../background/fetchPullRequests";
 
 type State =
   | { status: "loading" }
   | { status: "no-token" }
   | { status: "no-repos" }
-  | { status: "done"; prs: PullRequest[] }
+  | { status: "done"; prs: PullRequest[]; errors: RepoError[]; repos: string[] }
   | { status: "error"; message: string };
 
 export const PopoverContent = () => {
   const [state, setState] = useState<State>({ status: "loading" });
+  const [refreshCount, setRefreshCount] = useState(0);
 
   useEffect(() => {
+    setState({ status: "loading" });
     chrome.storage.sync.get({ githubToken: "", repos: [] }, (stored) => {
       if (!stored.githubToken) {
         setState({ status: "no-token" });
@@ -40,10 +43,12 @@ export const PopoverContent = () => {
           setState({ status: "error", message: chrome.runtime.lastError.message ?? "Unknown error" });
           return;
         }
-        setState({ status: "done", prs: response?.payload ?? [] });
+        setState({ status: "done", prs: response?.payload ?? [], errors: response?.errors ?? [], repos: stored.repos });
       });
     });
-  }, []);
+  }, [refreshCount]);
+
+  const handleRefresh = () => setRefreshCount((c) => c + 1);
 
   const openOptionsPage = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -54,9 +59,19 @@ export const PopoverContent = () => {
     <ThemeProvider colorMode="auto">
       <BaseStyles style={{ minWidth: 320, maxWidth: 480, padding: "12px 16px" }}>
         <Stack direction="vertical" gap="normal">
-          <Heading as="h2" variant="small">
-            GitHub PR Reviews
-          </Heading>
+          <Stack direction="horizontal" align="center" style={{ justifyContent: "space-between" }}>
+            <Heading as="h2" variant="small">
+              GitHub PR Reviews
+            </Heading>
+            <IconButton
+              icon={state.status === "loading" ? Spinner : SyncIcon}
+              aria-label="Refresh"
+              size="small"
+              variant="invisible"
+              onClick={handleRefresh}
+              disabled={state.status === "loading"}
+            />
+          </Stack>
 
           {state.status === "loading" && (
             <Stack direction="horizontal" gap="condensed" align="center">
@@ -91,14 +106,8 @@ export const PopoverContent = () => {
             </Text>
           )}
 
-          {state.status === "done" && state.prs.length === 0 && (
-            <Text size="small" style={{ color: "var(--fgColor-muted)" }}>
-              No open pull requests.
-            </Text>
-          )}
-
-          {state.status === "done" && state.prs.length > 0 && (
-            <PullRequestList prs={state.prs} />
+          {state.status === "done" && (
+            <PullRequestList prs={state.prs} repos={state.repos} errors={state.errors} />
           )}
 
           <Link
@@ -115,20 +124,43 @@ export const PopoverContent = () => {
   );
 };
 
-const PullRequestList = ({ prs }: { prs: PullRequest[] }) => {
+const PullRequestList = ({ prs, repos, errors }: { prs: PullRequest[]; repos: string[]; errors: RepoError[] }) => {
   const byRepo = prs.reduce<Record<string, PullRequest[]>>((acc, pr) => {
     (acc[pr.repo] ??= []).push(pr);
     return acc;
   }, {});
 
+  const errorByRepo = errors.reduce<Record<string, RepoError>>((acc, err) => {
+    acc[err.repo] = err;
+    return acc;
+  }, {});
+
   return (
     <Stack direction="vertical" gap="normal">
-      {Object.entries(byRepo).map(([repo, repoPrs]) => (
-        <Stack key={repo} direction="vertical" gap="condensed">
-          <Text size="small" weight="semibold" style={{ color: "var(--fgColor-muted)" }}>
-            {repo}
-          </Text>
-          {repoPrs.slice(0, 10).map((pr) => (
+      {repos.map((repo) => {
+        const repoPrs = byRepo[repo] ?? [];
+        const repoError = errorByRepo[repo];
+        return (
+          <Stack key={repo} direction="vertical" gap="condensed">
+            <Text size="small" weight="semibold" style={{ color: "var(--fgColor-muted)" }}>
+              {repo}
+            </Text>
+            {repoError && (
+              <Text size="small" style={{ color: "var(--fgColor-danger)" }}>
+                {repoError.message}{" "}
+                {repoError.ssoAuthorizeUrl && (
+                  <Link href={repoError.ssoAuthorizeUrl} target="_blank" rel="noopener noreferrer">
+                    Authorize SSO →
+                  </Link>
+                )}
+              </Text>
+            )}
+            {!repoError && repoPrs.length === 0 && (
+              <Text size="small" style={{ color: "var(--fgColor-muted)" }}>
+                No pull requests awaiting your review.
+              </Text>
+            )}
+            {repoPrs.slice(0, 10).map((pr) => (
             <Stack key={pr.id} direction="horizontal" gap="condensed" align="center">
               {pr.draft
                 ? <span style={{ flexShrink: 0, color: "var(--fgColor-muted)", display: "flex" }}><GitPullRequestDraftIcon size={16} /></span>
@@ -157,18 +189,19 @@ const PullRequestList = ({ prs }: { prs: PullRequest[] }) => {
               </Link>
             </Stack>
           ))}
-          {repoPrs.length > 10 && (
-            <Link
-              href={`https://github.com/${repo}/pulls`}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ fontSize: "var(--text-body-size-small)" }}
-            >
-              +{repoPrs.length - 10} more — view all on GitHub
-            </Link>
-          )}
-        </Stack>
-      ))}
+            {repoPrs.length > 10 && (
+              <Link
+                href={`https://github.com/${repo}/pulls`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ fontSize: "var(--text-body-size-small)" }}
+              >
+                +{repoPrs.length - 10} more — view all on GitHub
+              </Link>
+            )}
+          </Stack>
+        );
+      })}
     </Stack>
   );
 };

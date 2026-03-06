@@ -34,8 +34,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log("[BACKGROUND] received message:", message, sender);
 
   if (message.action === "GET_PULL_REQUESTS") {
-    fetchOpenPullRequests(githubToken, repos, username).then((prs) => {
-      sendResponse({ action: "PULL_REQUESTS", payload: prs });
+    fetchOpenPullRequests(githubToken, repos, username).then(({ prs, errors }) => {
+      sendResponse({ action: "PULL_REQUESTS", payload: prs, errors });
     });
     return true; // Keep the message channel open for sendResponse
   }

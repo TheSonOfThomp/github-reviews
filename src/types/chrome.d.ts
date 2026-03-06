@@ -7,6 +7,7 @@ declare namespace chrome.runtime {
   export interface Response {
     action: string;
     payload?: any;
+    errors?: any[];
     message?: Message;
   }
 

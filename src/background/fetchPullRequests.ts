@@ -11,6 +11,17 @@ export interface PullRequest {
   repo: string;
 }
 
+export interface RepoError {
+  repo: string;
+  message: string;
+  ssoAuthorizeUrl?: string;
+}
+
+export interface FetchPullRequestsResult {
+  prs: PullRequest[];
+  errors: RepoError[];
+}
+
 const githubHeaders = (token: string) => ({
   Authorization: `Bearer ${token}`,
   Accept: "application/vnd.github+json",
@@ -32,50 +43,63 @@ export async function fetchOpenPullRequests(
   githubToken: string,
   repos: string[],
   username: string
-): Promise<PullRequest[]> {
+): Promise<FetchPullRequestsResult> {
   if (!githubToken) {
     console.warn("[BACKGROUND] no GitHub token set");
-    return [];
+    return { prs: [], errors: [] };
   }
   if (!repos.length) {
     console.warn("[BACKGROUND] no repos configured");
-    return [];
+    return { prs: [], errors: [] };
   }
 
   const results = await Promise.allSettled(
-    repos.map(async (repo) => {
+    repos.map(async (repo): Promise<{ prs: PullRequest[]; error?: RepoError }> => {
       const url = `https://api.github.com/repos/${repo}/pulls?state=open&per_page=100`;
-      console.log(`[BACKGROUND] fetching PRs from ${repo} for user ${username}`, url);
+      console.log(`[BACKGROUND] fetching PRs from ${repo} for user ${username}`);
       const response = await fetch(url, {
         headers: githubHeaders(githubToken),
       });
 
       if (!response.ok) {
-        throw new Error(
-          `[BACKGROUND] GitHub API error for ${repo}: ${response.status} ${response.statusText}`
-        );
+        // Detect SSO enforcement — GitHub returns a URL to authorize the token
+        const ssoHeader = response.headers.get("X-GitHub-SSO");
+        const ssoMatch = ssoHeader?.match(/url=([^;]+)/);
+        const ssoAuthorizeUrl = ssoMatch?.[1];
+
+        const error: RepoError = {
+          repo,
+          message: ssoAuthorizeUrl
+            ? `SSO authorization required for ${repo}`
+            : `GitHub API error for ${repo}: ${response.status} ${response.statusText}`,
+          ...(ssoAuthorizeUrl ? { ssoAuthorizeUrl } : {}),
+        };
+        return { prs: [], error };
       }
 
       const prs: PullRequest[] = await response.json();
-      return prs
-        .map((pr) => ({ ...pr, repo }))
-        .filter((pr) =>
-          pr.requested_reviewers.some((r) => r.login === username)
-        );
+      return {
+        prs: prs
+          .map((pr) => ({ ...pr, repo }))
+          .filter((pr) => pr.requested_reviewers.some((r) => r.login === username)),
+      };
     })
   );
 
-  const pullRequests: PullRequest[] = [];
+  const prs: PullRequest[] = [];
+  const errors: RepoError[] = [];
+
   for (const result of results) {
     if (result.status === "fulfilled") {
-      pullRequests.push(...result.value);
+      prs.push(...result.value.prs);
+      if (result.value.error) errors.push(result.value.error);
     } else {
       console.error(result.reason);
     }
   }
 
   console.log(
-    `[BACKGROUND] ${pullRequests.length} PR(s) awaiting review from ${username} across ${repos.length} repo(s)`
+    `[BACKGROUND] ${prs.length} PR(s) awaiting review from ${username} across ${repos.length} repo(s), ${errors.length} error(s)`
   );
-  return pullRequests;
+  return { prs, errors };
 }
