@@ -4,7 +4,13 @@
   "description": "A Chrome extension to list GitHub pull request reviews.",
   "version": "0.1",
   "action": {
-    "default_popup": "index.html"
+    "default_popup": "index.html",
+    "default_icon": "GitHub_Invertocat_Black.png"
+  },
+  "icons": {
+    "16": "GitHub_Invertocat_Black.png",
+    "48": "GitHub_Invertocat_Black.png",
+    "128": "GitHub_Invertocat_Black.png"
   },
   "options_page": "options.html",
   "permissions": ["storage"],
