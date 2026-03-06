@@ -5,15 +5,15 @@
   "version": "0.1",
   "action": {
     "default_popup": "index.html",
-    "default_icon": "GitHub_Invertocat_Black.png"
+    "default_icon": "GitHub_Invertocat_Purple.png"
   },
   "icons": {
-    "16": "GitHub_Invertocat_Black.png",
-    "48": "GitHub_Invertocat_Black.png",
-    "128": "GitHub_Invertocat_Black.png"
+    "16": "GitHub_Invertocat_Purple.png",
+    "48": "GitHub_Invertocat_Purple.png",
+    "128": "GitHub_Invertocat_Purple.png"
   },
   "options_page": "options.html",
-  "permissions": ["storage"],
+  "permissions": ["storage", "alarms"],
   "host_permissions": ["https://api.github.com/*"],
   "content_scripts": [
     {
