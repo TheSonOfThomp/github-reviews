@@ -1,11 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "My Extension",
-  "description": "Base Level Extension",
+  "name": "GitHub Reviews",
+  "description": "A Chrome extension to list GitHub pull request reviews.",
   "version": "0.1",
   "action": {
     "default_popup": "index.html"
   },
+  "options_page": "options.html",
+  "permissions": ["storage"],
+  "host_permissions": ["https://api.github.com/*"],
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
