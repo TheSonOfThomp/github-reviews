@@ -39,10 +39,12 @@ export async function fetchAuthenticatedUser(githubToken: string): Promise<strin
   return data.login as string;
 }
 
-export async function fetchOpenPullRequests(
+async function fetchPRsFromRepos(
   githubToken: string,
   repos: string[],
-  username: string
+  username: string,
+  filter: (pr: PullRequest, username: string) => boolean,
+  logLabel: string
 ): Promise<FetchPullRequestsResult> {
   if (!githubToken) {
     console.warn("[BACKGROUND] no GitHub token set");
@@ -56,7 +58,7 @@ export async function fetchOpenPullRequests(
   const results = await Promise.allSettled(
     repos.map(async (repo): Promise<{ prs: PullRequest[]; error?: RepoError }> => {
       const url = `https://api.github.com/repos/${repo}/pulls?state=open&per_page=100`;
-      console.log(`[BACKGROUND] fetching PRs from ${repo} for user ${username}`);
+      console.log(`[BACKGROUND] fetching ${logLabel} from ${repo} for user ${username}`);
       const response = await fetch(url, {
         headers: githubHeaders(githubToken),
       });
@@ -79,9 +81,7 @@ export async function fetchOpenPullRequests(
 
       const prs: PullRequest[] = await response.json();
       return {
-        prs: prs
-          .map((pr) => ({ ...pr, repo }))
-          .filter((pr) => pr.requested_reviewers.some((r) => r.login === username)),
+        prs: prs.map((pr) => ({ ...pr, repo })).filter((pr) => filter(pr, username)),
       };
     })
   );
@@ -99,7 +99,35 @@ export async function fetchOpenPullRequests(
   }
 
   console.log(
-    `[BACKGROUND] ${prs.length} PR(s) awaiting review from ${username} across ${repos.length} repo(s), ${errors.length} error(s)`
+    `[BACKGROUND] ${prs.length} ${logLabel} for ${username} across ${repos.length} repo(s), ${errors.length} error(s)`
   );
   return { prs, errors };
+}
+
+export async function fetchOpenPullRequests(
+  githubToken: string,
+  repos: string[],
+  username: string
+): Promise<FetchPullRequestsResult> {
+  return fetchPRsFromRepos(
+    githubToken,
+    repos,
+    username,
+    (pr, user) => pr.requested_reviewers.some((r) => r.login === user),
+    "PRs awaiting review"
+  );
+}
+
+export async function fetchMyOpenPullRequests(
+  githubToken: string,
+  repos: string[],
+  username: string
+): Promise<FetchPullRequestsResult> {
+  return fetchPRsFromRepos(
+    githubToken,
+    repos,
+    username,
+    (pr, user) => pr.user.login === user,
+    "my open PRs"
+  );
 }
