@@ -28,9 +28,21 @@ type ViewMode = "review" | "mine";
 export const PopoverContent = () => {
   const [state, setState] = useState<State>({ status: "loading" });
   const [refreshCount, setRefreshCount] = useState(0);
-  const [viewMode, setViewMode] = useState<ViewMode>("review");
+  const [viewMode, setViewMode] = useState<ViewMode | null>(null);
 
   useEffect(() => {
+    chrome.storage.local.get({ viewMode: "review" }, (stored) => {
+      setViewMode(stored.viewMode as ViewMode);
+    });
+  }, []);
+
+  const handleViewModeChange = (mode: ViewMode) => {
+    setViewMode(mode);
+    chrome.storage.local.set({ viewMode: mode });
+  };
+
+  useEffect(() => {
+    if (viewMode === null) return;
     setState({ status: "loading" });
     chrome.storage.sync.get({ githubToken: "", repos: [] }, (stored) => {
       if (!stored.githubToken) {
@@ -62,7 +74,7 @@ export const PopoverContent = () => {
 
   return (
     <ThemeProvider colorMode="auto">
-      <BaseStyles style={{ minWidth: 320, maxWidth: 480, padding: "12px 16px" }}>
+      <BaseStyles style={{ minWidth: 320, maxWidth: 480, padding: "12px 16px", minHeight: "100vh", display: "grid", gridTemplateRows: "1fr auto", gridTemplateColumns: "100%" }}>
         <Stack direction="vertical" gap="normal">
           <Stack direction="horizontal" align="center" style={{ justifyContent: "space-between" }}>
             <Heading as="h2" variant="small">
@@ -78,16 +90,16 @@ export const PopoverContent = () => {
             />
           </Stack>
 
-          <SegmentedControl aria-label="View mode" fullWidth>
+          <SegmentedControl aria-label="View mode" fullWidth key={viewMode}>
             <SegmentedControl.Button
               selected={viewMode === "review"}
-              onClick={() => setViewMode("review")}
+              onClick={() => handleViewModeChange("review")}
             >
               Review Requests
             </SegmentedControl.Button>
             <SegmentedControl.Button
               selected={viewMode === "mine"}
-              onClick={() => setViewMode("mine")}
+              onClick={() => handleViewModeChange("mine")}
             >
               My Open PRs
             </SegmentedControl.Button>
@@ -127,18 +139,18 @@ export const PopoverContent = () => {
           )}
 
           {state.status === "done" && (
-            <PullRequestList prs={state.prs} repos={state.repos} errors={state.errors} viewMode={viewMode} />
+            <PullRequestList prs={state.prs} repos={state.repos} errors={state.errors} viewMode={viewMode!} />
           )}
-
-          <Link
-            href="#"
-            onClick={openOptionsPage}
-            style={{ fontSize: "var(--text-body-size-small)", display: "inline-flex", alignItems: "center", gap: 4 }}
-          >
-            <GearIcon size={12} />
-            Settings
-          </Link>
         </Stack>
+
+        <Link
+          href="#"
+          onClick={openOptionsPage}
+          style={{ fontSize: "var(--text-body-size-small)", display: "inline-flex", alignItems: "center", gap: 4, paddingTop: 8 }}
+        >
+          <GearIcon size={12} />
+          Settings
+        </Link>
       </BaseStyles>
     </ThemeProvider>
   );

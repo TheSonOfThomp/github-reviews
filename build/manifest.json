@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "GitHub Reviews",
   "description": "A Chrome extension to list GitHub pull request reviews.",
-  "version": "0.1",
+  "version": "0.2",
   "action": {
     "default_popup": "index.html",
     "default_icon": "GitHub_Invertocat_Purple.png"
