@@ -15,12 +15,6 @@
   "options_page": "options.html",
   "permissions": ["storage", "alarms"],
   "host_permissions": ["https://api.github.com/*"],
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["js/content.js"]
-    }
-  ],
   "background": {
     "service_worker": "js/background.js",
     "type": "module"
