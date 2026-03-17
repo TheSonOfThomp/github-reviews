@@ -207,6 +207,7 @@ const PullRequestList = ({ prs, repos, errors, viewMode }: { prs: PullRequest[];
               />
               <Link
                 href={pr.html_url}
+                title={`#${pr.number} ${pr.title}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{
