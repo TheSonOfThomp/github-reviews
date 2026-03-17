@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import "@primer/primitives/dist/css/functional/themes/light.css";
 import "@primer/primitives/dist/css/functional/themes/dark.css";
 import "@primer/css/dist/primer.css";
@@ -14,7 +14,7 @@ import {
   IconButton,
   Link,
 } from "@primer/react";
-import { XIcon, EyeIcon, EyeClosedIcon } from "@primer/octicons-react";
+import { XIcon, EyeIcon, EyeClosedIcon, GrabberIcon, CheckCircleFillIcon } from "@primer/octicons-react";
 
 interface Settings {
   githubToken: string;
@@ -29,8 +29,14 @@ const defaultSettings: Settings = {
 export const OptionsPage = () => {
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [saved, setSaved] = useState(false);
+  const [savedExiting, setSavedExiting] = useState(false);
   const [newRepo, setNewRepo] = useState("");
   const [showToken, setShowToken] = useState(false);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const tokenDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bannerExitRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bannerRemoveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     chrome.storage.sync.get(defaultSettings, (stored) => {
@@ -40,8 +46,12 @@ export const OptionsPage = () => {
 
   const saveSettings = (updated: Settings) => {
     chrome.storage.sync.set(updated, () => {
+      if (bannerExitRef.current) clearTimeout(bannerExitRef.current);
+      if (bannerRemoveRef.current) clearTimeout(bannerRemoveRef.current);
       setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      setSavedExiting(false);
+      bannerExitRef.current = setTimeout(() => setSavedExiting(true), 2000);
+      bannerRemoveRef.current = setTimeout(() => { setSaved(false); setSavedExiting(false); }, 2300);
     });
   };
 
@@ -70,11 +80,66 @@ export const OptionsPage = () => {
     saveSettings(updated);
   };
 
+  const handleDragStart = (index: number) => setDraggedIndex(index);
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    setDragOverIndex(index);
+  };
+
+  const handleDrop = (index: number) => {
+    if (draggedIndex === null || draggedIndex === index) return;
+    const repos = [...settings.repos];
+    const [moved] = repos.splice(draggedIndex, 1);
+    repos.splice(index, 0, moved);
+    const updated = { ...settings, repos };
+    setSettings(updated);
+    saveSettings(updated);
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
+
   return (
     <ThemeProvider colorMode="auto">
       <BaseStyles
           style={{ height: '100%', padding: "0 16px" }}
       >
+        <style>{`
+          @keyframes bannerIn {
+            from { opacity: 0; transform: translateY(-100%); }
+            to   { opacity: 1; transform: translateY(0); }
+          }
+          @keyframes bannerOut {
+            from { opacity: 1; transform: translateY(0); }
+            to   { opacity: 0; transform: translateY(-100%); }
+          }
+        `}</style>
+        {saved && (
+          <div style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 100,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "10px 20px",
+            background: "var(--bgColor-success-emphasis)",
+            color: "var(--fgColor-onEmphasis)",
+            fontSize: "var(--text-body-size-small)",
+            fontWeight: "var(--base-text-weight-semibold)",
+            animation: `${savedExiting ? "bannerOut" : "bannerIn"} 300ms ease forwards`,
+          }}>
+            <CheckCircleFillIcon size={16} />
+            Settings saved
+          </div>
+        )}
         <Stack
           direction="vertical"
           gap="normal"
@@ -89,9 +154,12 @@ export const OptionsPage = () => {
             <TextInput
               type={showToken ? "text" : "password"}
               value={settings.githubToken}
-              onChange={(e) =>
-                setSettings({ ...settings, githubToken: e.target.value })
-              }
+              onChange={(e) => {
+                const updated = { ...settings, githubToken: e.target.value };
+                setSettings(updated);
+                if (tokenDebounceRef.current) clearTimeout(tokenDebounceRef.current);
+                tokenDebounceRef.current = setTimeout(() => saveSettings(updated), 800);
+              }}
               placeholder="ghp_..."
               monospace
               block
@@ -127,8 +195,29 @@ export const OptionsPage = () => {
           <FormControl>
             <FormControl.Label>Repositories to check</FormControl.Label>
             <Stack direction="vertical" gap="condensed">
-              {settings.repos.map((repo) => (
-                <Stack key={repo} direction="horizontal" gap="condensed" align="center">
+              {settings.repos.map((repo, index) => (
+                <Stack
+                  key={repo}
+                  direction="horizontal"
+                  gap="condensed"
+                  align="center"
+                  draggable
+                  onDragStart={() => handleDragStart(index)}
+                  onDragOver={(e) => handleDragOver(e, index)}
+                  onDrop={() => handleDrop(index)}
+                  onDragEnd={handleDragEnd}
+                  style={{
+                    opacity: draggedIndex === index ? 0.4 : 1,
+                    borderRadius: 6,
+                    outline: dragOverIndex === index && draggedIndex !== index
+                      ? "2px solid var(--borderColor-accent-emphasis)"
+                      : "2px solid transparent",
+                    transition: "outline 80ms",
+                  }}
+                >
+                  <span style={{ color: "var(--fgColor-muted)", cursor: "grab", display: "flex", flexShrink: 0 }}>
+                    <GrabberIcon size={16} />
+                  </span>
                   <Text
                     size="small"
                     style={{
@@ -172,11 +261,6 @@ export const OptionsPage = () => {
             <Button variant="primary" onClick={handleSave}>
               Save
             </Button>
-            {saved && (
-              <Text size="small" style={{ color: "var(--fgColor-success)" }}>
-                ✓ Saved!
-              </Text>
-            )}
           </Stack>
         </Stack>
       </BaseStyles>
