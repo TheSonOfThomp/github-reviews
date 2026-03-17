@@ -1,6 +1,7 @@
 import {
   fetchAuthenticatedUser,
   fetchOpenPullRequests,
+  fetchMyOpenPullRequests,
 } from "./fetchPullRequests";
 
 const ALARM_NAME = "poll-pull-requests";
@@ -76,6 +77,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       ({ prs, errors }) => {
         updateBadge(prs.length);
         sendResponse({ action: "PULL_REQUESTS", payload: prs, errors });
+      },
+    );
+    return true;
+  }
+
+  if (message.action === "GET_MY_PULL_REQUESTS") {
+    fetchMyOpenPullRequests(githubToken, repos, username).then(
+      ({ prs, errors }) => {
+        sendResponse({ action: "MY_PULL_REQUESTS", payload: prs, errors });
       },
     );
     return true;

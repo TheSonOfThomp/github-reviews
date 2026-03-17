@@ -11,6 +11,7 @@ import {
   Spinner,
   Stack,
   IconButton,
+  SegmentedControl,
 } from "@primer/react";
 import { GearIcon, GitPullRequestIcon, GitPullRequestDraftIcon, SyncIcon } from "@primer/octicons-react";
 import type { PullRequest, RepoError } from "../background/fetchPullRequests";
@@ -22,9 +23,12 @@ type State =
   | { status: "done"; prs: PullRequest[]; errors: RepoError[]; repos: string[] }
   | { status: "error"; message: string };
 
+type ViewMode = "review" | "mine";
+
 export const PopoverContent = () => {
   const [state, setState] = useState<State>({ status: "loading" });
   const [refreshCount, setRefreshCount] = useState(0);
+  const [viewMode, setViewMode] = useState<ViewMode>("review");
 
   useEffect(() => {
     setState({ status: "loading" });
@@ -38,7 +42,8 @@ export const PopoverContent = () => {
         return;
       }
 
-      chrome.runtime.sendMessage({ action: "GET_PULL_REQUESTS" }, (response) => {
+      const action = viewMode === "review" ? "GET_PULL_REQUESTS" : "GET_MY_PULL_REQUESTS";
+      chrome.runtime.sendMessage({ action }, (response) => {
         if (chrome.runtime.lastError) {
           setState({ status: "error", message: chrome.runtime.lastError.message ?? "Unknown error" });
           return;
@@ -46,7 +51,7 @@ export const PopoverContent = () => {
         setState({ status: "done", prs: response?.payload ?? [], errors: response?.errors ?? [], repos: stored.repos });
       });
     });
-  }, [refreshCount]);
+  }, [refreshCount, viewMode]);
 
   const handleRefresh = () => setRefreshCount((c) => c + 1);
 
@@ -72,6 +77,21 @@ export const PopoverContent = () => {
               disabled={state.status === "loading"}
             />
           </Stack>
+
+          <SegmentedControl aria-label="View mode" fullWidth>
+            <SegmentedControl.Button
+              selected={viewMode === "review"}
+              onClick={() => setViewMode("review")}
+            >
+              Review Requests
+            </SegmentedControl.Button>
+            <SegmentedControl.Button
+              selected={viewMode === "mine"}
+              onClick={() => setViewMode("mine")}
+            >
+              My Open PRs
+            </SegmentedControl.Button>
+          </SegmentedControl>
 
           {state.status === "loading" && (
             <Stack direction="horizontal" gap="condensed" align="center">
@@ -107,7 +127,7 @@ export const PopoverContent = () => {
           )}
 
           {state.status === "done" && (
-            <PullRequestList prs={state.prs} repos={state.repos} errors={state.errors} />
+            <PullRequestList prs={state.prs} repos={state.repos} errors={state.errors} viewMode={viewMode} />
           )}
 
           <Link
@@ -124,7 +144,7 @@ export const PopoverContent = () => {
   );
 };
 
-const PullRequestList = ({ prs, repos, errors }: { prs: PullRequest[]; repos: string[]; errors: RepoError[] }) => {
+const PullRequestList = ({ prs, repos, errors, viewMode }: { prs: PullRequest[]; repos: string[]; errors: RepoError[]; viewMode: ViewMode }) => {
   const byRepo = prs.reduce<Record<string, PullRequest[]>>((acc, pr) => {
     (acc[pr.repo] ??= []).push(pr);
     return acc;
@@ -157,7 +177,7 @@ const PullRequestList = ({ prs, repos, errors }: { prs: PullRequest[]; repos: st
             )}
             {!repoError && repoPrs.length === 0 && (
               <Text size="small" style={{ color: "var(--fgColor-muted)" }}>
-                No pull requests awaiting your review.
+                {viewMode === "review" ? "No pull requests awaiting your review." : "No open pull requests."}
               </Text>
             )}
             {repoPrs.slice(0, 10).map((pr) => (
