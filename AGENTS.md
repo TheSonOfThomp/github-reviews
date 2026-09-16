@@ -15,7 +15,7 @@ Chrome extension (Manifest V3, checked in at `build/manifest.json`) that surface
 
 - `pnpm build` / `pnpm watch` — production build
 - `pnpm build:demo` / `pnpm watch:demo` — DEMO build (fake Faker.js data, no GitHub API; see PR #12)
-- `pnpm types` — typecheck (a pre-existing error exists in `src/options/options.tsx:206`; ignore it, don't fix it incidentally)
+- `pnpm types` — typecheck (clean; the former pre-existing `options.tsx:206` implicit-any was fixed to let CI pass)
 
 ## Build-flag safety
 
