@@ -23,5 +23,6 @@
   "background": {
     "service_worker": "js/background.js",
     "type": "module"
-  }
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArwO4f8uPw5kNAIy/gdn0NxEKhuq/36ou4rRrWH37gFQUN3WlfT+Wob034o9/RoT39dbTMLmOTrtR28n9hhrqvCe7aRkfxQe/ZK1QiLQ1BDoRXciZ+y7vw3tJJPwkgcE/wIQHUe+5sBUnywhs9AOkTZxGUOXaDgY5UfurxHgvTam9LGAUEwJn+PiPyp8FmBshB4Mj4C0tBL4vM/9KqudK5gwnhLDRhrawoXyhUgGcNvxEtN0r/hizxj1rDgX0Yol0y3oFcXGEeCmrsrjKxcbu4sX3IsHHPZj/W/c+H7JsD9NjxnU13TjefaA7hopbKMtBwAthzctDL9gl7EF+fcaDvwIDAQAB"
 }
