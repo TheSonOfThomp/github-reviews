@@ -112,6 +112,20 @@ export const PopoverContent = () => {
   return (
     <ThemeProvider colorMode="auto">
       <BaseStyles style={{ width: 360, padding: "12px 16px", minHeight: "100vh", display: "grid", gridTemplateRows: "1fr auto", gridTemplateColumns: "100%" }}>
+        <style>{`
+          /* Build tag: dimmer/smaller than Primer's muted small text, but still
+             WCAG AA (>= 4.5:1) in both themes against bgColor-default:
+             light #6a737d on #ffffff = 4.82:1, dark #74808f on #0d1117 = 4.71:1 */
+          .build-tag {
+            font-size: 11px;
+            line-height: 1.5;
+            font-family: var(--fontStack-monospace, monospace);
+            color: #6a737d;
+          }
+          @media (prefers-color-scheme: dark) {
+            .build-tag { color: #74808f; }
+          }
+        `}</style>
         <Stack direction="vertical" gap="normal">
           <Stack direction="horizontal" align="center" style={{ justifyContent: "space-between" }}>
             <Heading as="h2" variant="small">
@@ -199,10 +213,7 @@ export const PopoverContent = () => {
             <GearIcon size={12} />
             Settings
           </Link>
-          <Text
-            size="small"
-            style={{ color: "var(--fgColor-muted)", fontFamily: "monospace" }}
-          >
+          <Text as="span" className="build-tag">
             v{chrome.runtime.getManifest().version} · {__BUILD_COMMIT__}
           </Text>
         </Stack>
