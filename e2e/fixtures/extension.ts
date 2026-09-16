@@ -54,6 +54,9 @@ export const test = base.extend<Fixtures>({
     await context.close();
   },
   sw: async ({ context }, use) => {
+    // launchPersistentContext opens with a blank initial tab; close it so
+    // Playwright's per-test screenshot captures only the popup page
+    for (const page of context.pages()) await page.close();
     await use(await extensionServiceWorker(context));
   },
   extensionId: async ({ sw }, use) => {

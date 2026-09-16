@@ -11,5 +11,7 @@ export default defineConfig({
   globalSetup: "./global-setup",
   use: {
     trace: "on-first-retry",
+    // A PNG per test, published to the PR by CI (see .github/workflows/ci.yml)
+    screenshot: "on",
   },
 });
