@@ -3,18 +3,21 @@
   <head>
     <meta charset="utf-8" />
     <style>
-      /* Kill the browser-default 8px body margin — it paints a white ring
-         around the popup's themed content, right up to the window edge. */
+      /* Permanent: kill the browser-default 8px body margin — it paints a
+         white ring around the popup's themed content. Also pre-paint the
+         dark-scheme page background so dark-mode users see no white flash
+         before the themed app mounts. */
       html, body {
         margin: 0;
         padding: 0;
       }
-
-      /* Pre-JS skeleton: the popup paints instantly while the bundle parses.
-         Cleared in src/popover/index.tsx before React mounts. Fixed width and
-         padding match the React root (width: 360, padding: 12px 16px) so the
-         popup window doesn't resize on mount. Left-aligned like the React
-         loading state (spinner + label row). */
+      @media (prefers-color-scheme: dark) {
+        body { background: #0d1117; } /* --bgColor-default (dark) */
+      }
+    </style>
+    <!-- Skeleton styles: removed by src/popover/index.tsx when React mounts,
+         so they must never target #root in ways that outlive the skeleton -->
+    <style id="skeleton-style">
       #root {
         box-sizing: border-box;
         width: 360px;
@@ -35,10 +38,7 @@
         animation: skel-spin 0.8s linear infinite;
       }
       @keyframes skel-spin { to { transform: rotate(360deg); } }
-
-      /* Match the app's colorMode "auto": no white flash for dark-mode users */
       @media (prefers-color-scheme: dark) {
-        body { background: #0d1117; } /* --bgColor-default (dark) */
         #root { color: #8c959f; }     /* --fgColor-muted (dark) */
         #root .spinner {
           border-color: #3d444d;      /* --borderColor-default (dark) */
