@@ -40,6 +40,7 @@ The E2E suite (`e2e/`) drives the real built extension headlessly; no human, no 
 - **GitHub API stubbing**: the browser is launched with `--host-resolver-rules` mapping `api.github.com` (and `i.pravatar.cc`, for demo avatars) to the in-process HTTPS stub in `e2e/stub/server.ts` (self-signed cert checked in beside it). The stub serves data from the DEMO-mode generator (`demoRawPullsForRepo`), re-seeding faker per response so each fetch returns different-but-deterministic data — tests tell fetches apart by content and use the `prCache` storage as the source of truth for assertions.
 - **Viewport + themes**: contexts launch at 360×600 (the popover's real chrome) and run twice via the `light`/`dark` Playwright projects — the context fixture maps the project name to `prefers-color-scheme`, which Primer's `colorMode="auto"` follows.
 - **Service worker access**: `context.serviceWorkers()` (or `waitForEvent("serviceworker")`) yields the extension SW; `sw.evaluate()` runs inside it — read/write `chrome.storage` from there, and `sw.on("console")` captures its logs. In the specs, storage helpers run via `page.evaluate` on the popup page instead, because pages outlive an idle-stopped SW.
+- **PR screenshot comments**: every test's popup screenshot is captured, but only tests that call `commentScreenshot()` (a `comment-screenshot` annotation) are published to the PR comment by CI — selection is read from the JSON reporter output via `e2e/scripts/flagged-screenshots.mjs`.
 - Set `E2E_SKIP_BUILD=1` to reuse an existing `build/` while iterating.
 
 ### Still human-only

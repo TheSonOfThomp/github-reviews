@@ -52,13 +52,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Collect screenshots into a flat tree named by test
+          # Collect screenshots of tests flagged with the comment-screenshot
+          # annotation (see e2e/scripts/flagged-screenshots.mjs)
           rm -rf /tmp/shots && mkdir -p /tmp/shots
           while IFS= read -r f; do
             dir=$(basename "$(dirname "$f")")
             kind=$(basename "$f" .png) # test-finished or test-failed
             cp "$f" "/tmp/shots/${dir}--${kind}.png"
-          done < <(find test-results -name 'test-finished-*.png' -o -name 'test-failed-*.png' | sort)
+          done < <(node e2e/scripts/flagged-screenshots.mjs | sort -u)
 
           if [ ! -d /tmp/shots ] || [ -z "$(ls -A /tmp/shots 2>/dev/null)" ]; then
             echo "No screenshots produced — skipping comment"

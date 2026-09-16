@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures/extension";
+import { test, expect, commentScreenshot } from "./fixtures/extension";
 import type { Page } from "@playwright/test";
 import type { CacheEntry } from "../src/background/reviewCache";
 
@@ -98,6 +98,7 @@ test("clears the cache when repos change, then renders the new repo", async ({
   openPopup,
   stub,
 }) => {
+  commentScreenshot();
   const page = await openPopup();
   await seedSettings(page, SETTINGS);
   await page.reload();
