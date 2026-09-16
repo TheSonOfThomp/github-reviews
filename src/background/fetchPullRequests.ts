@@ -1,3 +1,9 @@
+import {
+  demoFetchAuthenticatedUser,
+  demoFetchMyOpenPullRequests,
+  demoFetchOpenPullRequests,
+} from "./demoData";
+
 export interface PullRequest {
   id: number;
   number: number;
@@ -29,6 +35,7 @@ const githubHeaders = (token: string) => ({
 });
 
 export async function fetchAuthenticatedUser(githubToken: string): Promise<string> {
+  if (process.env.DEMO_MODE === "true") return demoFetchAuthenticatedUser();
   const response = await fetch("https://api.github.com/user", {
     headers: githubHeaders(githubToken),
   });
@@ -109,6 +116,7 @@ export async function fetchOpenPullRequests(
   repos: string[],
   username: string
 ): Promise<FetchPullRequestsResult> {
+  if (process.env.DEMO_MODE === "true") return demoFetchOpenPullRequests(githubToken, repos, username);
   return fetchPRsFromRepos(
     githubToken,
     repos,
@@ -123,6 +131,7 @@ export async function fetchMyOpenPullRequests(
   repos: string[],
   username: string
 ): Promise<FetchPullRequestsResult> {
+  if (process.env.DEMO_MODE === "true") return demoFetchMyOpenPullRequests(githubToken, repos, username);
   return fetchPRsFromRepos(
     githubToken,
     repos,

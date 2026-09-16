@@ -19,8 +19,13 @@ function updateBadge(count: number) {
   chrome.action.setBadgeBackgroundColor({ color: BADGE_BG_COLOR });
 }
 
+// In DEMO mode the fetchers fall back to built-in repos/username, so the
+// settings guard is skipped and the badge still shows a demo count.
+// NOTE: keep the negated flag check as `!== "true"` — a bare
+// `!process.env.DEMO_MODE` folds to constant false in production builds
+// and would delete this guard from prod bundles.
 async function refreshPullRequests() {
-  if (!githubToken || !repos.length || !username) {
+  if (process.env.DEMO_MODE !== "true" && (!githubToken || !repos.length || !username)) {
     updateBadge(0);
     return;
   }

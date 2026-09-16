@@ -4,6 +4,8 @@ import typescript from '@rollup/plugin-typescript';
 import replace from '@rollup/plugin-replace';
 import postcss from 'rollup-plugin-postcss';
 
+const isDemo = process.env.DEMO_MODE === '1' || process.env.DEMO_MODE === 'true';
+
 const plugins = [
   postcss({ inject: true, minimize: true, config: false }),
   resolve(), // Resolves node_modules imports
@@ -11,6 +13,7 @@ const plugins = [
   typescript({ tsconfig: './tsconfig.json' }),
   replace({
     'process.env.NODE_ENV': JSON.stringify('production'), // Replace process.env.NODE_ENV
+    'process.env.DEMO_MODE': JSON.stringify(isDemo ? 'true' : 'false'),
     preventAssignment: true,
   }), 
 ]
