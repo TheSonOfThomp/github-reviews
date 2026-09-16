@@ -26,7 +26,7 @@ export default defineConfig({
   ],
   use: {
     trace: "on-first-retry",
-    // A PNG per test; only tests flagged with commentScreenshot() are
+    // A PNG per test; only tests annotated with comment-screenshot are
     // published to the PR by CI (see e2e/scripts/flagged-screenshots.mjs)
     screenshot: "on",
   },

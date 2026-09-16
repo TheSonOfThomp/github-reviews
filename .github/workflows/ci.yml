@@ -52,14 +52,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Collect screenshots of tests flagged with the comment-screenshot
-          # annotation (see e2e/scripts/flagged-screenshots.mjs)
-          rm -rf /tmp/shots && mkdir -p /tmp/shots
-          while IFS= read -r f; do
-            dir=$(basename "$(dirname "$f")")
-            kind=$(basename "$f" .png) # test-finished or test-failed
-            cp "$f" "/tmp/shots/${dir}--${kind}.png"
-          done < <(node e2e/scripts/flagged-screenshots.mjs | sort -u)
+          # Build the comment body (a light/dark table of screenshots from
+          # tests annotated with comment-screenshot) and stage the PNGs
+          rm -rf /tmp/shots
+          node e2e/scripts/screenshot-comment.mjs \
+            --run "${RUN_ID}" \
+            --sha "${SHA}" \
+            --raw-base "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${BRANCH}" \
+            --out /tmp/shots > /tmp/comment.md
 
           if [ ! -d /tmp/shots ] || [ -z "$(ls -A /tmp/shots 2>/dev/null)" ]; then
             echo "No screenshots produced — skipping comment"
@@ -80,22 +80,6 @@ jobs:
           git push -f origin "$commit:refs/heads/${BRANCH}"
 
           # Upsert a single comment (marker-tagged) instead of spamming new ones
-          raw_base="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${BRANCH}"
-          {
-            echo '<!--e2e-screenshots-->'
-            echo '### E2E screenshots'
-            echo
-            echo "Latest run: ${RUN_ID} at ${SHA:0:7}"
-            echo
-            for f in /tmp/shots/*.png; do
-              name=$(basename "$f" .png)
-              echo "**${name}**"
-              echo
-              echo "![${name}](${raw_base}/${RUN_ID}/$(basename "$f"))"
-              echo
-            done
-          } > /tmp/comment.md
-
           comments="repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments"
           existing=$(gh api --paginate "$comments" -q '.[] | select(.body | contains("<!--e2e-screenshots-->")) | .id' | head -1 || true)
           if [ -n "${existing:-}" ]; then

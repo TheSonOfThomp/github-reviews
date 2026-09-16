@@ -1,4 +1,4 @@
-import { test, expect, commentScreenshot } from "./fixtures/extension";
+import { test, expect } from "./fixtures/extension";
 import type { Page } from "@playwright/test";
 import type { CacheEntry } from "../src/background/reviewCache";
 
@@ -94,29 +94,30 @@ test("renders the cached list first, then revalidates in the background", async 
   await expect(firstPr).not.toHaveAttribute("title", cachedTitle!, { timeout: 10_000 });
 });
 
-test("clears the cache when repos change, then renders the new repo", async ({
-  openPopup,
-  stub,
-}) => {
-  commentScreenshot();
-  const page = await openPopup();
-  await seedSettings(page, SETTINGS);
-  await page.reload();
-  await expect(page.getByText("acme/widgets")).toBeVisible();
-  await expect.poll(async () => (await readCache(page)) !== null).toBe(true);
+test(
+  "clears the cache when repos change, then renders the new repo",
+  // comment-screenshot: publish this test's screenshots to the PR comment
+  { annotation: { type: "comment-screenshot" } },
+  async ({ openPopup, stub }) => {
+    const page = await openPopup();
+    await seedSettings(page, SETTINGS);
+    await page.reload();
+    await expect(page.getByText("acme/widgets")).toBeVisible();
+    await expect.poll(async () => (await readCache(page)) !== null).toBe(true);
 
-  // Hold the post-change refetch back so the cleared state is observable
-  stub.delayMs = 2000;
-  await seedSettings(page, { repos: ["acme/gadgets"] });
-  await expect.poll(async () => await readCache(page), { timeout: 1_500 }).toBe(null);
+    // Hold the post-change refetch back so the cleared state is observable
+    stub.delayMs = 2000;
+    await seedSettings(page, { repos: ["acme/gadgets"] });
+    await expect.poll(async () => await readCache(page), { timeout: 1_500 }).toBe(null);
 
-  stub.delayMs = 0;
-  await page.reload();
+    stub.delayMs = 0;
+    await page.reload();
 
-  await expect(page.getByText("acme/gadgets")).toBeVisible();
-  // The old repo's cached PRs must not render against the new settings
-  await expect(page.getByText("acme/widgets")).toBeHidden();
-});
+    await expect(page.getByText("acme/gadgets")).toBeVisible();
+    // The old repo's cached PRs must not render against the new settings
+    await expect(page.getByText("acme/widgets")).toBeHidden();
+  }
+);
 
 test("switching to My Open PRs shows PRs authored by the user", async ({ openPopup }) => {
   const page = await openPopup();

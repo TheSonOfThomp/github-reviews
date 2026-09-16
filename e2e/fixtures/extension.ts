@@ -76,12 +76,3 @@ export const test = base.extend<Fixtures>({
 });
 
 export { expect } from "@playwright/test";
-
-/**
- * Flag the current test's screenshots for publishing to the PR comment
- * (see e2e/scripts/flagged-screenshots.mjs and the CI publish step).
- * Call as the first line of the test body.
- */
-export const commentScreenshot = () => {
-  test.info().annotations.push({ type: "comment-screenshot" });
-};
