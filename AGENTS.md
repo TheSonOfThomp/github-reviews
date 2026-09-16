@@ -15,7 +15,7 @@ Chrome extension (Manifest V3, checked in at `build/manifest.json`) that surface
 
 - `pnpm build` / `pnpm watch` — production build
 - `pnpm build:demo` / `pnpm watch:demo` — DEMO build (fake Faker.js data, no GitHub API; see PR #12)
-- `pnpm types` — typecheck (a pre-existing error exists in `src/options/options.tsx:206`; ignore it, don't fix it incidentally)
+- `pnpm types` — typecheck (clean; the former pre-existing `options.tsx:206` implicit-any was fixed to let CI pass)
 
 ## Build-flag safety
 
@@ -24,26 +24,42 @@ Chrome extension (Manifest V3, checked in at `build/manifest.json`) that surface
 ## Verifying changes (agent-runnable)
 
 - `pnpm types` — no new errors
+- `pnpm test:unit` — vitest suite with a mocked `chrome` global (`test/mocks/chrome.ts`) + mocked `fetch`; covers `fetchPullRequests` (SSO header parsing, review/mine filtering, error buckets), `reviewCache`, and the background wiring (message handling, the `settingsLoaded()` cold-start cache gate, settings-change invalidation, alarms/badge)
+- `pnpm test:e2e` — Playwright suite in `e2e/`; self-contained (builds the extension via global setup, needs `pnpm exec playwright install chromium` once). Covers the popup flows against a stubbed GitHub API: no-token guard, render + cache write, stale-while-revalidate, cache invalidation on settings change, view toggle, SSO error path
+- `pnpm test` — both
 - `pnpm build` — then grep the bundles: DEMO artifacts (`faker`, `pravatar`, `demo-user`) must be 0 in production; `no-token`/`no-repos` guards must survive (2 occurrences each in `popover.js`); `prCache` present in `background.js` + `popover.js`
 - `pnpm build:demo` — then grep: `api.github.com` refs in `background.js` must be 0; restore with `pnpm build` afterward
 
-## Chrome testing limitations — read this before trying to "just test it"
+## Automated browser testing (Playwright) — how it works
 
-**We cannot easily use the Chrome browser to debug or test this extension from an agent session.** Verified limitations:
+The E2E suite (`e2e/`) drives the real built extension headlessly; no human, no DevTools, no GitHub credentials. Key mechanics, in case you need to extend it:
 
-- An agent's managed/automated browser cannot load unpacked extensions. Loading requires launching a *separate* Chrome instance with `--load-extension=<repo>/build` and a throwaway `--user-data-dir` profile:
+- **Loading**: `chromium.launchPersistentContext` with `--disable-extensions-except` + `--load-extension`, and **`channel: "chromium"`** — Playwright's default headless *shell* cannot load extensions; this channel selects full Chromium in the new headless mode.
+- **Popup**: opened as a regular tab at `chrome-extension://<id>/index.html` (the toolbar action itself is not scriptable — this is the sanctioned workaround).
+- **Deterministic ID**: `build/manifest.json` carries a committed `key` (public half of a dev-only keypair), so the unpacked extension ID is `lgmeobbcpmgdpheclekekjkcjehpecgo` on every machine. The publish workflows strip this key before zipping — keep that step if you touch them.
+- **GitHub API stubbing**: the browser is launched with `--host-resolver-rules` mapping `api.github.com` (and `i.pravatar.cc`, for demo avatars) to the in-process HTTPS stub in `e2e/stub/server.ts` (self-signed cert checked in beside it). The stub serves data from the DEMO-mode generator (`demoRawPullsForRepo`), re-seeding faker per response so each fetch returns different-but-deterministic data — tests tell fetches apart by content and use the `prCache` storage as the source of truth for assertions.
+- **Viewport + themes**: contexts launch at 360×600 (the popover's real chrome) and run twice via the `light`/`dark` Playwright projects — the context fixture maps the project name to `prefers-color-scheme`, which Primer's `colorMode="auto"` follows.
+- **Service worker access**: `context.serviceWorkers()` (or `waitForEvent("serviceworker")`) yields the extension SW; `sw.evaluate()` runs inside it — read/write `chrome.storage` from there, and `sw.on("console")` captures its logs. In the specs, storage helpers run via `page.evaluate` on the popup page instead, because pages outlive an idle-stopped SW.
+- **PR screenshot comments**: every test's popup screenshot is captured, but only annotated tests are published to the PR comment. To include a test's screenshots, set the annotation directly in its declaration:
+
+  ```ts
+  test(
+    "clears the cache when repos change, then renders the new repo",
+    { annotation: { type: "comment-screenshot" } },
+    async ({ openPopup, stub }) => { ... }
+  );
   ```
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-    --user-data-dir=$(mktemp -d) --no-first-run \
-    --load-extension="$(pwd)/build"
-  ```
-- The toolbar popup cannot be opened programmatically (no scriptable click on the action icon). Workaround: pass `chrome-extension://<id>/index.html` as a startup tab — it renders the popup UI in a normal tab. The unpacked extension ID is deterministic from the build path (SHA-256 of the absolute path, hex digits mapped a–p).
-- The extension's service worker (its console, network, `chrome.storage` contents) is not reachable from agent tooling — a human must open DevTools at `chrome://extensions` → *service worker* / *Inspect views*.
-- `chrome://` pages are not accessible to automation.
 
-**Therefore:** behavioral verification (cache hits, badge, SSO paths, storage invalidation) is human-only for now. Agents should do the static bundle checks above, optionally launch a headed Chrome with the extension for a human, and say clearly what remains manually unverified.
+  CI reads the Playwright JSON report (`test-results/report.json`), selects those tests' screenshot attachments (`e2e/scripts/flagged-screenshots.mjs`), pushes the PNGs to the `ci/e2e-screenshots` branch, and upserts a marker-tagged PR comment rendering them as a light/dark table (`e2e/scripts/screenshot-comment.mjs`). Both theme variants of an annotated test are included automatically.
+- Set `E2E_SKIP_BUILD=1` to reuse an existing `build/` while iterating.
 
-**Investigating better options (automated E2E, CDP access, unit-testable seams): see issue #14.**
+### Still human-only
+
+- Loading the extension into your real browser profile (agent browsers can't load unpacked extensions into a managed profile)
+- `chrome://` pages (extensions manager, storage inspector)
+- Chrome Web Store publish flows (workflows handle it, but verifying the store listing is manual)
+
+For background on why this setup exists: issue #14.
 
 ## Conventions
 

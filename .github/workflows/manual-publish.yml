@@ -24,6 +24,11 @@ jobs:
       - name: Build extension
         run: pnpm build
 
+      - name: Strip dev manifest key
+        # The `key` field pins a deterministic ID for local/unpacked loads;
+        # it must not ship to the Chrome Web Store, which assigns its own ID.
+        run: node -e "const fs=require('fs');const m=JSON.parse(fs.readFileSync('build/manifest.json','utf8'));delete m.key;fs.writeFileSync('build/manifest.json',JSON.stringify(m,null,2)+'\n')"
+
       - name: Zip extension
         run: cd build && zip -r ../extension.zip .
 

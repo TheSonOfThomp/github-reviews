@@ -203,7 +203,7 @@ export const OptionsPage = () => {
                   align="center"
                   draggable
                   onDragStart={() => handleDragStart(index)}
-                  onDragOver={(e) => handleDragOver(e, index)}
+                  onDragOver={(e: React.DragEvent) => handleDragOver(e, index)}
                   onDrop={() => handleDrop(index)}
                   onDragEnd={handleDragEnd}
                   style={{

@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: write # push the ci/e2e-screenshots branch
+  pull-requests: write # upsert the screenshot comment
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 8.12.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install chromium --with-deps
+
+      - name: Typecheck
+        run: pnpm types
+
+      - name: Unit tests
+        run: pnpm test:unit
+
+      - name: E2E tests
+        run: pnpm test:e2e
+
+      # Push each run's E2E screenshots to a scratch branch and upsert an
+      # inline-image comment on the PR (repo is public, so raw URLs render).
+      - name: Publish E2E screenshots to the PR
+        if: github.event_name == 'pull_request' && always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.number }}
+          RUN_ID: ${{ github.run_id }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          BRANCH: ci/e2e-screenshots
+        run: |
+          set -euo pipefail
+
+          # Build the comment body (a light/dark table of screenshots from
+          # tests annotated with comment-screenshot) and stage the PNGs
+          rm -rf /tmp/shots
+          node e2e/scripts/screenshot-comment.mjs \
+            --run "${RUN_ID}" \
+            --sha "${SHA}" \
+            --raw-base "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${BRANCH}" \
+            --out /tmp/shots > /tmp/comment.md
+
+          if [ ! -d /tmp/shots ] || [ -z "$(ls -A /tmp/shots 2>/dev/null)" ]; then
+            echo "No screenshots produced — skipping comment"
+            exit 0
+          fi
+
+          # Build a tree from the screenshots without touching the checkout
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          export GIT_INDEX_FILE="$(mktemp)"
+          git read-tree --empty
+          for f in /tmp/shots/*.png; do
+            blob=$(git hash-object -w "$f")
+            git update-index --add --cacheinfo 100644,"$blob","${RUN_ID}/$(basename "$f")"
+          done
+          tree=$(git write-tree)
+          commit=$(git commit-tree "$tree" -m "E2E screenshots from run ${RUN_ID}")
+          git push -f origin "$commit:refs/heads/${BRANCH}"
+
+          # Upsert a single comment (marker-tagged) instead of spamming new ones
+          comments="repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments"
+          existing=$(gh api --paginate "$comments" -q '.[] | select(.body | contains("<!--e2e-screenshots-->")) | .id' | head -1 || true)
+          if [ -n "${existing:-}" ]; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" -F body=@/tmp/comment.md
+          else
+            gh api -X POST "$comments" -F body=@/tmp/comment.md
+          fi
