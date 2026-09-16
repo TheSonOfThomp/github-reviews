@@ -25,6 +25,9 @@ type State =
 
 type ViewMode = "review" | "mine";
 
+// In DEMO mode with no repos configured, group by the repos the PRs themselves carry
+const uniqueRepos = (prs: PullRequest[]) => Array.from(new Set(prs.map((pr) => pr.repo)));
+
 export const PopoverContent = () => {
   const [state, setState] = useState<State>({ status: "loading" });
   const [refreshCount, setRefreshCount] = useState(0);
@@ -45,11 +48,15 @@ export const PopoverContent = () => {
     if (viewMode === null) return;
     setState({ status: "loading" });
     chrome.storage.sync.get({ githubToken: "", repos: [] }, (stored) => {
-      if (!stored.githubToken) {
+      // DEMO mode bypasses the settings guards so demo data renders unconfigured.
+      // NOTE: keep negated flag checks as `!== "true"` — a bare
+      // `!process.env.DEMO_MODE` folds to constant false in production builds
+      // and would delete these guards from prod bundles.
+      if (process.env.DEMO_MODE !== "true" && !stored.githubToken) {
         setState({ status: "no-token" });
         return;
       }
-      if (!stored.repos?.length) {
+      if (process.env.DEMO_MODE !== "true" && !stored.repos?.length) {
         setState({ status: "no-repos" });
         return;
       }
@@ -60,7 +67,13 @@ export const PopoverContent = () => {
           setState({ status: "error", message: chrome.runtime.lastError.message ?? "Unknown error" });
           return;
         }
-        setState({ status: "done", prs: response?.payload ?? [], errors: response?.errors ?? [], repos: stored.repos });
+        const prs = response?.payload ?? [];
+        setState({
+          status: "done",
+          prs,
+          errors: response?.errors ?? [],
+          repos: stored.repos.length ? stored.repos : uniqueRepos(prs),
+        });
       });
     });
   }, [refreshCount, viewMode]);
