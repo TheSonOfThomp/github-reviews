@@ -186,14 +186,26 @@ export const PopoverContent = () => {
           )}
         </Stack>
 
-        <Link
-          href="#"
-          onClick={openOptionsPage}
-          style={{ fontSize: "var(--text-body-size-small)", display: "inline-flex", alignItems: "center", gap: 4, paddingTop: 8 }}
+        <Stack
+          direction="horizontal"
+          align="center"
+          style={{ justifyContent: "space-between", paddingTop: 8 }}
         >
-          <GearIcon size={12} />
-          Settings
-        </Link>
+          <Link
+            href="#"
+            onClick={openOptionsPage}
+            style={{ fontSize: "var(--text-body-size-small)", display: "inline-flex", alignItems: "center", gap: 4 }}
+          >
+            <GearIcon size={12} />
+            Settings
+          </Link>
+          <Text
+            size="small"
+            style={{ color: "var(--fgColor-muted)", fontFamily: "monospace" }}
+          >
+            v{chrome.runtime.getManifest().version} · {__BUILD_COMMIT__}
+          </Text>
+        </Stack>
       </BaseStyles>
     </ThemeProvider>
   );
