@@ -65,4 +65,5 @@ For background on why this setup exists: issue #14.
 
 - Changesets: repo uses `.changeset/`; the package is pre-1.0, so feature releases are `patch`, not `minor`
 - Chrome manifest `version` accepts 1–4 dot-separated integers only — no prerelease tags (`0.2.1-alpha.0` is invalid); `scripts/sync-manifest-version.mjs` copies `package.json` → `build/manifest.json` verbatim
-- Issues #6–#9 have implementation plans in `plans/`; #7 is skipped, #9 is deferred until #8 lands
+- Issues #6–#9 have implementation plans in `plans/`; #7 is skipped, #9 was fixed by the `settingsReady` work (#9/#16) along with #16
+- **Service-worker cold start:** module-scope settings (`githubToken`, `repos`, `username`) load asynchronously in `startSettings()`. Anything that fetches with them — message handlers, `refreshPullRequests()`, the `storage.onChanged` handler — must `await settingsReady` first, or cold-started SWs serve 200-OK-but-empty responses (#9). Never put network round trips before `settingsReadyResolve()` — they gate the first popup open after an extension reload (#16). The username is persisted in `chrome.storage.local` (`githubUsername`) precisely so cold starts need no network.

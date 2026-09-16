@@ -114,7 +114,7 @@ describe("runtime messages", () => {
     });
   });
 
-  it("does not overwrite a good cache when the message arrives before settings load (cold-start race)", async () => {
+  it("does not serve a message with partial settings; awaits the startup load (cold-start race)", async () => {
     const goodEntry: CacheEntry = {
       prs: PRS as never,
       errors: [],
@@ -128,17 +128,29 @@ describe("runtime messages", () => {
     });
     await importBackground();
 
-    // Message handled while settings are still unloaded — empty fetch result
-    const response = (await chromeMock.__sendMessage({ action: "GET_PULL_REQUESTS" })) as {
+    // Message sent while settings are still unloaded: the handler must NOT
+    // respond with an empty fetch. It awaits settingsReady, so the response
+    // arrives only after the settings load completes — with correct data.
+    const responsePromise = chromeMock.__sendMessage({ action: "GET_PULL_REQUESTS" }) as Promise<{
       payload: unknown[];
-    };
-    expect(response.payload).toEqual([]);
+    }>;
     await flush();
     await flush();
+    // Still pending: no empty response was served while settings unloaded
+    // (the promise would have resolved by now if it had).
 
-    // The settingsLoaded() gate must have kept the good cache intact
-    expect(chromeMock.storage.local.set).not.toHaveBeenCalled();
-    expect(chromeMock.__stores.local[CACHE_STORAGE_KEY]).toEqual({ review: goodEntry });
+    // Now let the deferred settings load complete
+    chromeMock.__flushSyncGet();
+    const response = await responsePromise;
+
+    expect(response.payload).toHaveLength(2);
+    // The fetch used the fully-loaded username, and the cache write was
+    // correct (not the empty-settings clobber the race used to produce)
+    await vi.waitFor(() => {
+      const cache = chromeMock.__stores.local[CACHE_STORAGE_KEY] as Record<string, CacheEntry>;
+      expect(cache?.review?.prs).toHaveLength(2);
+      expect(cache?.review?.fetchedAt).not.toBe(1234);
+    });
   });
 });
 
@@ -154,11 +166,12 @@ describe("settings changes", () => {
 
     chromeMock.storage.sync.set({ githubToken: "token-2" });
 
-    expect(chromeMock.storage.local.remove).toHaveBeenCalledWith(
-      CACHE_STORAGE_KEY,
-      expect.anything()
-    );
-    expect(chromeMock.__stores.local[CACHE_STORAGE_KEY]).toBeUndefined();
+    await vi.waitFor(() => {
+      expect(chromeMock.storage.local.remove).toHaveBeenCalledWith(
+        CACHE_STORAGE_KEY,
+        expect.anything()
+      );
+    });
     // username refetched with the new token and the cache re-primed
     await vi.waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -182,10 +195,12 @@ describe("settings changes", () => {
 
     chromeMock.storage.sync.set({ repos: ["acme/gadgets"] });
 
-    expect(chromeMock.storage.local.remove).toHaveBeenCalledWith(
-      CACHE_STORAGE_KEY,
-      expect.anything()
-    );
+    await vi.waitFor(() => {
+      expect(chromeMock.storage.local.remove).toHaveBeenCalledWith(
+        CACHE_STORAGE_KEY,
+        expect.anything()
+      );
+    });
   });
 });
 
