@@ -22,28 +22,49 @@ const readCache = (page: Page) =>
       )
   );
 
+/**
+ * Wait until the popup is showing the PRs from the given view-mode's cache
+ * entry (the list caps at 10 per repo), and return that entry. Tolerates
+ * the stale-while-revalidate paint: the settled state is when the visible
+ * list matches the freshest cache write.
+ */
+async function settledEntry(page: Page, key: "review" | "mine"): Promise<CacheEntry> {
+  let entry: CacheEntry | undefined;
+  await expect
+    .poll(async () => {
+      const cache = await readCache(page);
+      entry = cache?.[key];
+      if (!entry || entry.prs.length === 0) return false;
+      const visible = await page.locator("a[title^='#']").count();
+      return visible === Math.min(entry.prs.length, 10);
+    })
+    .toBe(true);
+  return entry!;
+}
+
 test("popup shows the no-token guard when no settings are configured", async ({ openPopup }) => {
   const page = await openPopup();
 
   await expect(page.getByText("No GitHub token set.")).toBeVisible();
-  await expect(page.getByRole("link", { name: /^#1 / })).toBeHidden();
+  await expect(page.locator("a[title^='#']")).toHaveCount(0);
 });
 
-test("renders stubbed PRs and writes them to the cache", async ({ openPopup }) => {
+test("renders demo-data PRs and writes them to the cache", async ({ openPopup }) => {
   const page = await openPopup();
   await seedSettings(page, SETTINGS);
   await page.reload();
 
   await expect(page.getByText("acme/widgets")).toBeVisible();
-  await expect(page.getByRole("link", { name: /^#1 / })).toBeVisible();
-  await expect(page.getByRole("link", { name: /^#2 / })).toBeVisible();
-  // The mine-only PR (#13) is not shown in the review-requests view
-  await expect(page.getByRole("link", { name: /^#13 / })).toBeHidden();
+  const entry = await settledEntry(page, "review");
 
-  // #8 cache behavior: the fetch result lands in chrome.storage.local
-  const cache = await readCache(page);
-  expect(cache?.review?.prs).toHaveLength(2);
-  expect(cache?.review?.repos).toEqual(["acme/widgets"]);
+  expect(entry.errors).toEqual([]);
+  expect(entry.repos).toEqual(["acme/widgets"]);
+  // The real review filter ran: every cached PR requests the demo user's review
+  expect(entry.prs.every((pr) => pr.requested_reviewers.some((r) => r.login === "demo-user"))).toBe(true);
+
+  for (const pr of entry.prs.slice(0, 3)) {
+    await expect(page.getByRole("link", { name: new RegExp(`^#${pr.number} `) })).toBeVisible();
+  }
 });
 
 test("renders the cached list first, then revalidates in the background", async ({
@@ -54,10 +75,10 @@ test("renders the cached list first, then revalidates in the background", async 
   await seedSettings(page, SETTINGS);
   await page.reload();
 
-  const firstPr = page.locator("a[title^='#1']");
+  const firstPr = page.locator("a[title^='#']").first();
   await expect(firstPr).toBeVisible();
   const cachedTitle = await firstPr.getAttribute("title");
-  expect(cachedTitle).toContain("Batch");
+  expect(cachedTitle).toMatch(/^#\d+ /);
 
   // Slow the fresh fetch down so the cached render is observable
   stub.delayMs = 1500;
@@ -68,7 +89,8 @@ test("renders the cached list first, then revalidates in the background", async 
   await expect(page.locator(`a[title="${cachedTitle}"]`)).toBeVisible({ timeout: 1000 });
   stub.delayMs = 0;
 
-  // Once the fresh response arrives it replaces the cached content
+  // Once the fresh response arrives (a new seeded batch) it replaces the
+  // cached content
   await expect(firstPr).not.toHaveAttribute("title", cachedTitle!, { timeout: 10_000 });
 });
 
@@ -99,12 +121,16 @@ test("switching to My Open PRs shows PRs authored by the user", async ({ openPop
   const page = await openPopup();
   await seedSettings(page, SETTINGS);
   await page.reload();
-  await expect(page.getByRole("link", { name: /^#1 / })).toBeVisible();
+  const review = await settledEntry(page, "review");
 
   await page.getByRole("button", { name: "My Open PRs" }).click();
 
-  await expect(page.getByRole("link", { name: /^#13 / })).toBeVisible();
-  await expect(page.getByRole("link", { name: /^#1 / })).toBeHidden();
+  const mine = await settledEntry(page, "mine");
+  // The real mine filter ran: every cached PR is authored by the demo user
+  expect(mine.prs.every((pr) => pr.user.login === "demo-user")).toBe(true);
+  // And it is a different set from the review view
+  const reviewNumbers = new Set(review.prs.map((pr) => pr.number));
+  expect(mine.prs.some((pr) => !reviewNumbers.has(pr.number))).toBe(true);
 });
 
 test("surfaces the SSO authorization error for SSO-protected repos", async ({ openPopup }) => {

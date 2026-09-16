@@ -27,7 +27,7 @@ function getDemoRepos(): string[] {
   return demoRepos;
 }
 
-const DEMO_USERNAME = "demo-user";
+export const DEMO_USERNAME = "demo-user";
 
 // pravatar.cc serves a stable set of numbered placeholder photos (1..70)
 const avatarUrl = () => `https://i.pravatar.cc/80?img=${faker.number.int({ min: 1, max: 70 })}`;
@@ -67,6 +67,32 @@ function fakePRsForRepo(repo: string, count: number, authorLogin: string): PullR
 // Small delay so the loading-spinner path is exercised in demo mode too
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/*
+ * Raw /pulls-style response body for one repo — shared by the DEMO-mode
+ * fetchers and the E2E GitHub stub (e2e/stub/server.ts) so both serve the
+ * same data. Includes all three PR kinds the real API would return:
+ * PRs requesting the reviewer's review, PRs authored by the demo user,
+ * and unrelated PRs that both view filters drop.
+ */
+export function demoRawPullsForRepo(repo: string, reviewerLogin: string): PullRequest[] {
+  ensureSeed();
+  const pulls: PullRequest[] = [];
+
+  const reviewCount = faker.number.int({ min: 1, max: 5 });
+  for (let i = 0; i < reviewCount; i++) {
+    const [pr] = fakePRsForRepo(repo, 1, faker.internet.username());
+    pulls.push({ ...pr, requested_reviewers: [...pr.requested_reviewers, { login: reviewerLogin }] });
+  }
+
+  const mineCount = faker.number.int({ min: 1, max: 3 });
+  pulls.push(...fakePRsForRepo(repo, mineCount, DEMO_USERNAME));
+
+  const noiseCount = faker.number.int({ min: 0, max: 2 });
+  pulls.push(...fakePRsForRepo(repo, noiseCount, faker.internet.username()));
+
+  return pulls;
+}
+
 export async function demoFetchAuthenticatedUser(): Promise<string> {
   ensureSeed();
   return DEMO_USERNAME;
@@ -82,12 +108,9 @@ export async function demoFetchOpenPullRequests(
   const useRepos = repos.length ? repos : getDemoRepos();
   const user = username || DEMO_USERNAME;
   // Mirror the real filter: PRs whose requested_reviewers include the user
-  const prs = useRepos.flatMap((repo) =>
-    fakePRsForRepo(repo, faker.number.int({ min: 1, max: 6 }), faker.internet.username()).map((pr) => ({
-      ...pr,
-      requested_reviewers: [...pr.requested_reviewers, { login: user }],
-    }))
-  );
+  const prs = useRepos
+    .flatMap((repo) => demoRawPullsForRepo(repo, user))
+    .filter((pr) => pr.requested_reviewers.some((r) => r.login === user));
   return { prs, errors: [] };
 }
 
@@ -99,6 +122,8 @@ export async function demoFetchMyOpenPullRequests(
   ensureSeed();
   await delay(200);
   const useRepos = repos.length ? repos : getDemoRepos();
-  const prs = useRepos.flatMap((repo) => fakePRsForRepo(repo, faker.number.int({ min: 0, max: 4 }), DEMO_USERNAME));
+  const prs = useRepos
+    .flatMap((repo) => demoRawPullsForRepo(repo, DEMO_USERNAME))
+    .filter((pr) => pr.user.login === DEMO_USERNAME);
   return { prs, errors: [] };
 }

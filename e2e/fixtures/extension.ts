@@ -35,18 +35,22 @@ export const test = base.extend<Fixtures>({
     await use(stub);
     await stub.stop();
   },
-  context: async ({ stub }, use) => {
+  context: async ({ stub }, use, testInfo) => {
     const userDataDir = await mkdtemp(path.join(os.tmpdir(), "github-reviews-e2e-"));
     const context = await chromium.launchPersistentContext(userDataDir, {
       // The default headless *shell* cannot load extensions — channel
       // "chromium" selects full Chromium in the new headless mode.
       headless: true,
       channel: "chromium",
+      // Match the popover's real chrome: 360px wide, Chrome's 600px popup max
+      viewport: { width: 360, height: 600 },
+      // "light"/"dark" projects — Primer's colorMode="auto" follows it
+      colorScheme: testInfo.project.name === "dark" ? "dark" : "light",
       args: [
         `--disable-extensions-except=${EXTENSION_PATH}`,
         `--load-extension=${EXTENSION_PATH}`,
-        // Route all GitHub API traffic to the local stub
-        `--host-resolver-rules=MAP api.github.com 127.0.0.1:${stub.port}`,
+        // Route all GitHub API + demo avatar traffic to the local stub
+        `--host-resolver-rules=MAP api.github.com 127.0.0.1:${stub.port}, MAP i.pravatar.cc 127.0.0.1:${stub.port}`,
         "--ignore-certificate-errors",
       ],
     });
