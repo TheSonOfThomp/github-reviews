@@ -15,18 +15,26 @@ import {
 } from "@primer/react";
 import { GearIcon, GitPullRequestIcon, GitPullRequestDraftIcon, SyncIcon } from "@primer/octicons-react";
 import type { PullRequest, RepoError } from "../background/fetchPullRequests";
+import { readCache } from "../background/reviewCache";
 
 type State =
   | { status: "loading" }
   | { status: "no-token" }
   | { status: "no-repos" }
-  | { status: "done"; prs: PullRequest[]; errors: RepoError[]; repos: string[] }
+  | { status: "done"; prs: PullRequest[]; errors: RepoError[]; repos: string[]; fetchedAt?: number }
   | { status: "error"; message: string };
 
 type ViewMode = "review" | "mine";
 
 // In DEMO mode with no repos configured, group by the repos the PRs themselves carry
 const uniqueRepos = (prs: PullRequest[]) => Array.from(new Set(prs.map((pr) => pr.repo)));
+
+const arraysEqual = (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
+
+const timeAgo = (fetchedAt: number) => {
+  const minutes = Math.max(1, Math.round((Date.now() - fetchedAt) / 60000));
+  return minutes < 60 ? `${minutes}m ago` : `${Math.round(minutes / 60)}h ago`;
+};
 
 export const PopoverContent = () => {
   const [state, setState] = useState<State>({ status: "loading" });
@@ -62,17 +70,33 @@ export const PopoverContent = () => {
       }
 
       const action = viewMode === "review" ? "GET_PULL_REQUESTS" : "GET_MY_PULL_REQUESTS";
-      chrome.runtime.sendMessage({ action }, (response) => {
-        if (chrome.runtime.lastError) {
-          setState({ status: "error", message: chrome.runtime.lastError.message ?? "Unknown error" });
-          return;
+
+      // Stale-while-revalidate: render a matching cache entry immediately, then
+      // let the fresh response below overwrite it once it lands
+      readCache(viewMode).then((cached) => {
+        if (cached && arraysEqual(cached.repos, stored.repos)) {
+          setState({
+            status: "done",
+            prs: cached.prs,
+            errors: cached.errors,
+            repos: stored.repos.length ? stored.repos : uniqueRepos(cached.prs),
+            fetchedAt: cached.fetchedAt,
+          });
         }
-        const prs = response?.payload ?? [];
-        setState({
-          status: "done",
-          prs,
-          errors: response?.errors ?? [],
-          repos: stored.repos.length ? stored.repos : uniqueRepos(prs),
+
+        chrome.runtime.sendMessage({ action }, (response) => {
+          if (chrome.runtime.lastError) {
+            setState({ status: "error", message: chrome.runtime.lastError.message ?? "Unknown error" });
+            return;
+          }
+          const prs = response?.payload ?? [];
+          setState({
+            status: "done",
+            prs,
+            errors: response?.errors ?? [],
+            repos: stored.repos.length ? stored.repos : uniqueRepos(prs),
+            fetchedAt: Date.now(),
+          });
         });
       });
     });
@@ -117,6 +141,12 @@ export const PopoverContent = () => {
               My Open PRs
             </SegmentedControl.Button>
           </SegmentedControl>
+
+          {state.status === "done" && state.fetchedAt != null && (
+            <Text size="small" style={{ color: "var(--fgColor-muted)" }}>
+              Updated {timeAgo(state.fetchedAt)}
+            </Text>
+          )}
 
           {state.status === "loading" && (
             <Stack direction="horizontal" gap="condensed" align="center">
