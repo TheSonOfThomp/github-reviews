@@ -1,8 +1,54 @@
+<!DOCTYPE html>
 <html>
   <head>
+    <meta charset="utf-8" />
+    <style>
+      /* Permanent: kill the browser-default 8px body margin — it paints a
+         white ring around the popup's themed content. Also pre-paint the
+         dark-scheme page background so dark-mode users see no white flash
+         before the themed app mounts. */
+      html, body {
+        margin: 0;
+        padding: 0;
+      }
+      @media (prefers-color-scheme: dark) {
+        body { background: #0d1117; } /* --bgColor-default (dark) */
+      }
+    </style>
+    <!-- Skeleton styles: removed by src/popover/index.tsx when React mounts,
+         so they must never target #root in ways that outlive the skeleton -->
+    <style id="skeleton-style">
+      #root {
+        box-sizing: border-box;
+        width: 360px;
+        min-height: 120px;
+        padding: 12px 16px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font: 12px/1.5 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+        color: #59636e; /* --fgColor-muted */
+      }
+      #root .spinner {
+        width: 16px;
+        height: 16px;
+        border: 2px solid #d0d7de;
+        border-top-color: #59636e;
+        border-radius: 50%;
+        animation: skel-spin 0.8s linear infinite;
+      }
+      @keyframes skel-spin { to { transform: rotate(360deg); } }
+      @media (prefers-color-scheme: dark) {
+        #root { color: #8c959f; }     /* --fgColor-muted (dark) */
+        #root .spinner {
+          border-color: #3d444d;      /* --borderColor-default (dark) */
+          border-top-color: #8c959f;
+        }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><div class="spinner" aria-hidden="true"></div><div>Loading…</div></div>
   </body>
   <script src="js/popover.js"></script>
 </html>
