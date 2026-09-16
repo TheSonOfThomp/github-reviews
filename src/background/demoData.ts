@@ -1,9 +1,6 @@
 import { faker } from "@faker-js/faker";
 import type { FetchPullRequestsResult, PullRequest } from "./fetchPullRequests";
 
-const DEMO_REPOS = ["acme/widgets", "acme/platform", "globex/rocket-ui"];
-const DEMO_USERNAME = "demo-user";
-
 // Seed lazily (not at module top level) so the module has no initialization
 // side effects that could defeat tree-shaking in production builds
 let seeded = false;
@@ -13,6 +10,24 @@ function ensureSeed() {
     seeded = true;
   }
 }
+
+// Fake repositories, generated once per session (seeded) so they are
+// deterministic and both view modes group under the same repo set.
+// Slugified because some faker words contain spaces (e.g. "solid state")
+const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+let demoRepos: string[] | null = null;
+function getDemoRepos(): string[] {
+  if (!demoRepos) {
+    ensureSeed();
+    const count = faker.number.int({ min: 3, max: 5 });
+    demoRepos = Array.from({ length: count }, () =>
+      `${slug(faker.internet.domainWord())}/${slug(faker.hacker.adjective())}-${slug(faker.hacker.noun())}`
+    );
+  }
+  return demoRepos;
+}
+
+const DEMO_USERNAME = "demo-user";
 
 // pravatar.cc serves a stable set of numbered placeholder photos (1..70)
 const avatarUrl = () => `https://i.pravatar.cc/80?img=${faker.number.int({ min: 1, max: 70 })}`;
@@ -64,7 +79,7 @@ export async function demoFetchOpenPullRequests(
 ): Promise<FetchPullRequestsResult> {
   ensureSeed();
   await delay(200);
-  const useRepos = repos.length ? repos : DEMO_REPOS;
+  const useRepos = repos.length ? repos : getDemoRepos();
   const user = username || DEMO_USERNAME;
   // Mirror the real filter: PRs whose requested_reviewers include the user
   const prs = useRepos.flatMap((repo) =>
@@ -83,7 +98,7 @@ export async function demoFetchMyOpenPullRequests(
 ): Promise<FetchPullRequestsResult> {
   ensureSeed();
   await delay(200);
-  const useRepos = repos.length ? repos : DEMO_REPOS;
+  const useRepos = repos.length ? repos : getDemoRepos();
   const prs = useRepos.flatMap((repo) => fakePRsForRepo(repo, faker.number.int({ min: 0, max: 4 }), DEMO_USERNAME));
   return { prs, errors: [] };
 }
