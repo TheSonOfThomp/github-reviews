@@ -2,6 +2,7 @@ import resolve from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
 import typescript from '@rollup/plugin-typescript';
 import replace from '@rollup/plugin-replace';
+import terser from '@rollup/plugin-terser';
 import postcss from 'rollup-plugin-postcss';
 
 const isDemo = process.env.DEMO_MODE === '1' || process.env.DEMO_MODE === 'true';
@@ -15,7 +16,8 @@ const plugins = [
     'process.env.NODE_ENV': JSON.stringify('production'), // Replace process.env.NODE_ENV
     'process.env.DEMO_MODE': JSON.stringify(isDemo ? 'true' : 'false'),
     preventAssignment: true,
-  }), 
+  }),
+  terser(), // Minify: the popup is parse-bound on first open (2.1MB unminified)
 ]
 
 export default [
