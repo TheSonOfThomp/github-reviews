@@ -262,6 +262,14 @@ export const OptionsPage = () => {
               Save
             </Button>
           </Stack>
+
+          <Text
+            size="small"
+            style={{ color: "var(--fgColor-muted)", marginTop: 8 }}
+          >
+            GitHub Reviews v{chrome.runtime.getManifest().version} ·{" "}
+            <span style={{ fontFamily: "monospace" }}>{__BUILD_COMMIT__}</span>
+          </Text>
         </Stack>
       </BaseStyles>
     </ThemeProvider>

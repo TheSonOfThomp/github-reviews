@@ -1,4 +1,5 @@
 import resolve from '@rollup/plugin-node-resolve';
+import { execSync } from 'node:child_process';
 import commonjs from '@rollup/plugin-commonjs';
 import typescript from '@rollup/plugin-typescript';
 import replace from '@rollup/plugin-replace';
@@ -6,6 +7,17 @@ import terser from '@rollup/plugin-terser';
 import postcss from 'rollup-plugin-postcss';
 
 const isDemo = process.env.DEMO_MODE === '1' || process.env.DEMO_MODE === 'true';
+
+// Short commit of the checkout being built; 'unknown' when git isn't available
+// (e.g. building from an exported archive).
+function buildCommit() {
+  try {
+    return execSync('git rev-parse --short HEAD').toString().trim();
+  } catch {
+    return 'unknown';
+  }
+}
+const commitHash = buildCommit();
 
 const plugins = [
   postcss({ inject: true, minimize: true, config: false }),
@@ -15,6 +27,7 @@ const plugins = [
   replace({
     'process.env.NODE_ENV': JSON.stringify('production'), // Replace process.env.NODE_ENV
     'process.env.DEMO_MODE': JSON.stringify(isDemo ? 'true' : 'false'),
+    __BUILD_COMMIT__: JSON.stringify(commitHash),
     preventAssignment: true,
   }),
   terser(), // Minify: the popup is parse-bound on first open (2.1MB unminified)
