@@ -6,7 +6,9 @@ A [Chrome Extension](https://developer.chrome.com/docs/extensions/get-started) b
 
 Install from the [Chrome Web Store](https://chromewebstore.google.com/detail/nakeggihheppfmnkmpnglbdkpbicbhdd).
 
-![The extension popup listing open PRs](https://raw.githubusercontent.com/TheSonOfThomp/github-reviews/ci/e2e-screenshots/36166125622/popup-clears-the-cache-whe-f1782-e-then-renders-the-new-repo-dark--test-finished-1.png)
+| Review requests | My Open PRs |
+| --- | --- |
+| ![The extension popup listing PRs awaiting your review](assets/popup-review-requests.png) | ![The extension popup's My Open PRs tab](assets/popup-my-open-prs.png) |
 
 ## Build
 
