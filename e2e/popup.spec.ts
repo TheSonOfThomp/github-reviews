@@ -120,21 +120,26 @@ test(
   }
 );
 
-test("switching to My Open PRs shows PRs authored by the user", async ({ openPopup }) => {
-  const page = await openPopup();
-  await seedSettings(page, SETTINGS);
-  await page.reload();
-  const review = await settledEntry(page, "review");
+test(
+  "switching to My Open PRs shows PRs authored by the user",
+  // comment-screenshot: publish this test's screenshots to the PR comment
+  { annotation: { type: "comment-screenshot" } },
+  async ({ openPopup }) => {
+    const page = await openPopup();
+    await seedSettings(page, SETTINGS);
+    await page.reload();
+    const review = await settledEntry(page, "review");
 
-  await page.getByRole("button", { name: "My Open PRs" }).click();
+    await page.getByRole("button", { name: "My Open PRs" }).click();
 
-  const mine = await settledEntry(page, "mine");
-  // The real mine filter ran: every cached PR is authored by the demo user
-  expect(mine.prs.every((pr) => pr.user.login === "demo-user")).toBe(true);
-  // And it is a different set from the review view
-  const reviewNumbers = new Set(review.prs.map((pr) => pr.number));
-  expect(mine.prs.some((pr) => !reviewNumbers.has(pr.number))).toBe(true);
-});
+    const mine = await settledEntry(page, "mine");
+    // The real mine filter ran: every cached PR is authored by the demo user
+    expect(mine.prs.every((pr) => pr.user.login === "demo-user")).toBe(true);
+    // And it is a different set from the review view
+    const reviewNumbers = new Set(review.prs.map((pr) => pr.number));
+    expect(mine.prs.some((pr) => !reviewNumbers.has(pr.number))).toBe(true);
+  }
+);
 
 test("surfaces the SSO authorization error for SSO-protected repos", async ({ openPopup }) => {
   const page = await openPopup();

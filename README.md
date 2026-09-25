@@ -1,6 +1,12 @@
-# React Chrome Extension Template
+# GitHub Reviews
 
-A basic template for building a [Chrome Extension](https://developer.chrome.com/docs/extensions/get-started) using React.
+A [Chrome Extension](https://developer.chrome.com/docs/extensions/get-started) built with React that surfaces the PRs awaiting your review (and your own open PRs) in a toolbar popup.
+
+## Install
+
+Install from the [Chrome Web Store](https://chromewebstore.google.com/detail/nakeggihheppfmnkmpnglbdkpbicbhdd).
+
+![The extension popup listing open PRs](https://raw.githubusercontent.com/TheSonOfThomp/github-reviews/ci/e2e-screenshots/36166125622/popup-clears-the-cache-whe-f1782-e-then-renders-the-new-repo-dark--test-finished-1.png)
 
 ## Build
 
