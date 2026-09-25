@@ -46,7 +46,11 @@ function fakeUsers(count = 3): Array<{ login: string; avatar_url: string }> {
   });
 }
 
-function fakePRsForRepo(repo: string, count: number, authorLogin: string): PullRequest[] {
+// Demo PRs carry their requested reviewers so the demo "search" can filter
+// on them the way GitHub does server-side; the field is stripped on output
+type DemoPull = PullRequest & { requested_reviewers: Array<{ login: string }> };
+
+function fakePRsForRepo(repo: string, count: number, authorLogin: string): DemoPull[] {
   return Array.from({ length: count }, () => {
     const number = faker.number.int({ min: 100, max: 9999 });
     return {
@@ -68,15 +72,12 @@ function fakePRsForRepo(repo: string, count: number, authorLogin: string): PullR
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /*
- * Raw /pulls-style response body for one repo — shared by the DEMO-mode
- * fetchers and the E2E GitHub stub (e2e/stub/server.ts) so both serve the
- * same data. Includes all three PR kinds the real API would return:
- * PRs requesting the reviewer's review, PRs authored by the demo user,
- * and unrelated PRs that both view filters drop.
+ * All open demo PRs for one repo: PRs requesting the reviewer's review,
+ * PRs authored by the demo user, and unrelated PRs that both searches drop.
  */
-export function demoRawPullsForRepo(repo: string, reviewerLogin: string): PullRequest[] {
+function demoAllPullsForRepo(repo: string, reviewerLogin: string): DemoPull[] {
   ensureSeed();
-  const pulls: PullRequest[] = [];
+  const pulls: DemoPull[] = [];
 
   const reviewCount = faker.number.int({ min: 1, max: 5 });
   for (let i = 0; i < reviewCount; i++) {
@@ -93,6 +94,28 @@ export function demoRawPullsForRepo(repo: string, reviewerLogin: string): PullRe
   return pulls;
 }
 
+export type DemoSearchQualifier = "review-requested" | "author";
+
+/*
+ * Search-API-style result items for one repo — shared by the DEMO-mode
+ * fetchers and the E2E GitHub stub (e2e/stub/server.ts) so both serve the
+ * same data, filtered the way GitHub's `review-requested:` / `author:`
+ * qualifiers would.
+ */
+export function demoSearchPullsForRepo(
+  repo: string,
+  qualifier: DemoSearchQualifier,
+  login: string
+): PullRequest[] {
+  return demoAllPullsForRepo(repo, login)
+    .filter((pr) =>
+      qualifier === "author"
+        ? pr.user.login === login
+        : pr.requested_reviewers.some((r) => r.login === login)
+    )
+    .map(({ requested_reviewers: _, ...pr }) => pr);
+}
+
 export async function demoFetchAuthenticatedUser(): Promise<string> {
   ensureSeed();
   return DEMO_USERNAME;
@@ -107,10 +130,7 @@ export async function demoFetchOpenPullRequests(
   await delay(200);
   const useRepos = repos.length ? repos : getDemoRepos();
   const user = username || DEMO_USERNAME;
-  // Mirror the real filter: PRs whose requested_reviewers include the user
-  const prs = useRepos
-    .flatMap((repo) => demoRawPullsForRepo(repo, user))
-    .filter((pr) => pr.requested_reviewers.some((r) => r.login === user));
+  const prs = useRepos.flatMap((repo) => demoSearchPullsForRepo(repo, "review-requested", user));
   return { prs, errors: [] };
 }
 
@@ -122,8 +142,6 @@ export async function demoFetchMyOpenPullRequests(
   ensureSeed();
   await delay(200);
   const useRepos = repos.length ? repos : getDemoRepos();
-  const prs = useRepos
-    .flatMap((repo) => demoRawPullsForRepo(repo, DEMO_USERNAME))
-    .filter((pr) => pr.user.login === DEMO_USERNAME);
+  const prs = useRepos.flatMap((repo) => demoSearchPullsForRepo(repo, "author", DEMO_USERNAME));
   return { prs, errors: [] };
 }

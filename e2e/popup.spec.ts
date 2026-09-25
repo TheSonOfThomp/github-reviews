@@ -49,7 +49,7 @@ test("popup shows the no-token guard when no settings are configured", async ({ 
   await expect(page.locator("a[title^='#']")).toHaveCount(0);
 });
 
-test("renders demo-data PRs and writes them to the cache", async ({ openPopup }) => {
+test("renders demo-data PRs and writes them to the cache", async ({ openPopup, stub }) => {
   const page = await openPopup();
   await seedSettings(page, SETTINGS);
   await page.reload();
@@ -59,8 +59,9 @@ test("renders demo-data PRs and writes them to the cache", async ({ openPopup })
 
   expect(entry.errors).toEqual([]);
   expect(entry.repos).toEqual(["acme/widgets"]);
-  // The real review filter ran: every cached PR requests the demo user's review
-  expect(entry.prs.every((pr) => pr.requested_reviewers.some((r) => r.login === "demo-user"))).toBe(true);
+  // The review view searched server-side for the demo user's review requests
+  expect(entry.prs.length).toBeGreaterThan(0);
+  expect(stub.searchQueries).toContain("repo:acme/widgets is:pr is:open review-requested:demo-user");
 
   for (const pr of entry.prs.slice(0, 3)) {
     await expect(page.getByRole("link", { name: new RegExp(`^#${pr.number} `) })).toBeVisible();
