@@ -3,21 +3,21 @@ import { createChromeMock } from "../mocks/chrome";
 import { makeResponse } from "../mocks/fetch";
 import { CACHE_STORAGE_KEY, type CacheEntry } from "../../src/background/reviewCache";
 
-// Each stub PR both requests a review from octocat and is authored by
-// octocat, so it passes both the review and mine filters.
+// The Search API filters server-side, so the same stub items serve both
+// the review and mine searches.
 const PRS = [
-  { id: 1, number: 1, title: "PR 1", user: { login: "octocat", avatar_url: "" }, requested_reviewers: [{ login: "octocat" }] },
-  { id: 2, number: 2, title: "PR 2", user: { login: "octocat", avatar_url: "" }, requested_reviewers: [{ login: "octocat" }] },
+  { id: 1, number: 1, title: "PR 1", user: { login: "octocat", avatar_url: "" } },
+  { id: 2, number: 2, title: "PR 2", user: { login: "octocat", avatar_url: "" } },
 ];
 
-/** Mock fetch for the /user and /repos/.../pulls endpoints the background hits. */
+/** Mock fetch for the /user and /search/issues endpoints the background hits. */
 function stubGithubApi() {
   return vi.fn(async (url: string) => {
     if (url === "https://api.github.com/user") {
       return makeResponse({ body: { login: "octocat" } });
     }
-    if (url.startsWith("https://api.github.com/repos/")) {
-      return makeResponse({ body: PRS });
+    if (url.startsWith("https://api.github.com/search/issues")) {
+      return makeResponse({ body: { total_count: PRS.length, incomplete_results: false, items: PRS } });
     }
     throw new Error(`unexpected fetch: ${url}`);
   });

@@ -13,7 +13,6 @@ export interface PullRequest {
   created_at: string;
   updated_at: string;
   draft: boolean;
-  requested_reviewers: Array<{ login: string }>;
   repo: string;
 }
 
@@ -46,11 +45,42 @@ export async function fetchAuthenticatedUser(githubToken: string): Promise<strin
   return data.login as string;
 }
 
+/*
+ * Search-API query per repo. GitHub filters server-side, so large repos
+ * (e.g. 10gen/mms, 1500+ open PRs) no longer lose matches past the first
+ * page of /pulls (#10). `review-requested:` also matches team requests.
+ */
+export const searchUrl = (repo: string, qualifier: string) =>
+  `https://api.github.com/search/issues?q=${encodeURIComponent(
+    `repo:${repo} is:pr is:open ${qualifier}`
+  )}&per_page=100`;
+
+function errorForResponse(repo: string, response: Response): RepoError {
+  // Detect SSO enforcement — GitHub returns a URL to authorize the token
+  const ssoHeader = response.headers.get("X-GitHub-SSO");
+  const ssoAuthorizeUrl = ssoHeader?.match(/url=([^;]+)/)?.[1];
+  if (ssoAuthorizeUrl) {
+    return { repo, message: `SSO authorization required for ${repo}`, ssoAuthorizeUrl };
+  }
+  if ((response.status === 403 || response.status === 429) && response.headers.get("x-ratelimit-remaining") === "0") {
+    const reset = Number(response.headers.get("x-ratelimit-reset"));
+    const seconds = reset ? Math.max(0, Math.ceil(reset - Date.now() / 1000)) : undefined;
+    return {
+      repo,
+      message: `GitHub search rate limit hit${seconds !== undefined ? ` — retry in ${seconds}s` : ""}`,
+    };
+  }
+  if (response.status === 422) {
+    return { repo, message: `Repo ${repo} not found, or your token lacks access to it` };
+  }
+  return { repo, message: `GitHub API error for ${repo}: ${response.status} ${response.statusText}` };
+}
+
 async function fetchPRsFromRepos(
   githubToken: string,
   repos: string[],
   username: string,
-  filter: (pr: PullRequest, username: string) => boolean,
+  qualifierKey: "review-requested" | "author",
   logLabel: string
 ): Promise<FetchPullRequestsResult> {
   if (!githubToken) {
@@ -61,52 +91,61 @@ async function fetchPRsFromRepos(
     console.warn("[BACKGROUND] no repos configured");
     return { prs: [], errors: [] };
   }
+  if (!username) {
+    console.warn("[BACKGROUND] no GitHub username resolved");
+    return { prs: [], errors: [] };
+  }
+  const qualifier = `${qualifierKey}:${username}`;
 
   const results = await Promise.allSettled(
     repos.map(async (repo): Promise<{ prs: PullRequest[]; error?: RepoError }> => {
-      const url = `https://api.github.com/repos/${repo}/pulls?state=open&per_page=100`;
-      console.log(`[BACKGROUND] fetching ${logLabel} from ${repo} for user ${username}`);
-      const response = await fetch(url, {
+      console.log(`[BACKGROUND] searching ${logLabel} in ${repo} (${qualifier})`);
+      const response = await fetch(searchUrl(repo, qualifier), {
         headers: githubHeaders(githubToken),
       });
 
-      if (!response.ok) {
-        // Detect SSO enforcement — GitHub returns a URL to authorize the token
-        const ssoHeader = response.headers.get("X-GitHub-SSO");
-        const ssoMatch = ssoHeader?.match(/url=([^;]+)/);
-        const ssoAuthorizeUrl = ssoMatch?.[1];
+      if (!response.ok) return { prs: [], error: errorForResponse(repo, response) };
 
-        const error: RepoError = {
-          repo,
-          message: ssoAuthorizeUrl
-            ? `SSO authorization required for ${repo}`
-            : `GitHub API error for ${repo}: ${response.status} ${response.statusText}`,
-          ...(ssoAuthorizeUrl ? { ssoAuthorizeUrl } : {}),
+      // Search silently drops SSO-protected results the token isn't
+      // authorized for, flagging it with a "partial-results" header
+      if (response.headers.get("X-GitHub-SSO")?.startsWith("partial-results")) {
+        return {
+          prs: [],
+          error: {
+            repo,
+            message: `SSO authorization required for ${repo}`,
+            ssoAuthorizeUrl: "https://github.com/settings/tokens",
+          },
         };
-        return { prs: [], error };
       }
 
-      const prs: PullRequest[] = await response.json();
-      return {
-        prs: prs.map((pr) => ({ ...pr, repo })).filter((pr) => filter(pr, username)),
-      };
+      const data: { total_count: number; items: PullRequest[] } = await response.json();
+      if (data.total_count > data.items.length) {
+        console.warn(`[BACKGROUND] ${repo}: showing ${data.items.length} of ${data.total_count} ${logLabel}`);
+      }
+      return { prs: data.items.map((pr) => ({ ...pr, repo })) };
     })
   );
 
   const prs: PullRequest[] = [];
   const errors: RepoError[] = [];
 
-  for (const result of results) {
+  results.forEach((result, i) => {
     if (result.status === "fulfilled") {
       prs.push(...result.value.prs);
       if (result.value.error) errors.push(result.value.error);
     } else {
+      // Surface rejected fetches (network error, bad JSON) instead of
+      // letting the repo render as an empty "no PRs" list
       console.error(result.reason);
+      const repo = repos[i];
+      const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
+      errors.push({ repo, message: `Failed to fetch ${repo}: ${reason}` });
     }
-  }
+  });
 
   console.log(
-    `[BACKGROUND] ${prs.length} ${logLabel} for ${username} across ${repos.length} repo(s), ${errors.length} error(s)`
+    `[BACKGROUND] ${prs.length} ${logLabel} across ${repos.length} repo(s), ${errors.length} error(s)`
   );
   return { prs, errors };
 }
@@ -121,7 +160,7 @@ export async function fetchOpenPullRequests(
     githubToken,
     repos,
     username,
-    (pr, user) => pr.requested_reviewers.some((r) => r.login === user),
+    "review-requested",
     "PRs awaiting review"
   );
 }
@@ -136,7 +175,7 @@ export async function fetchMyOpenPullRequests(
     githubToken,
     repos,
     username,
-    (pr, user) => pr.user.login === user,
+    "author",
     "my open PRs"
   );
 }
