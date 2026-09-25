@@ -17,7 +17,20 @@ function buildCommit() {
     return 'unknown';
   }
 }
-const commitHash = buildCommit();
+// Branch being built. CI checkouts are often a detached HEAD, so prefer the
+// GitHub Actions ref (PR head branch first) over asking git.
+function buildBranch() {
+  const ciBranch = process.env.GITHUB_HEAD_REF || process.env.GITHUB_REF_NAME;
+  if (ciBranch) return ciBranch;
+  try {
+    return execSync('git rev-parse --abbrev-ref HEAD').toString().trim();
+  } catch {
+    return 'unknown';
+  }
+}
+// Builds from main are identified by version alone; the commit is only
+// shown for other branches, to tell pre-release builds apart.
+const commitHash = buildBranch() === 'main' ? '' : buildCommit();
 
 const plugins = [
   postcss({ inject: true, minimize: true, config: false }),
