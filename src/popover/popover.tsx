@@ -214,7 +214,8 @@ export const PopoverContent = () => {
             Settings
           </Link>
           <Text as="span" className="build-tag">
-            v{chrome.runtime.getManifest().version} · {__BUILD_COMMIT__}
+            v{chrome.runtime.getManifest().version}
+            {__BUILD_COMMIT__ && ` · ${__BUILD_COMMIT__}`}
           </Text>
         </Stack>
       </BaseStyles>

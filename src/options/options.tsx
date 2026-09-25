@@ -267,8 +267,13 @@ export const OptionsPage = () => {
             size="small"
             style={{ color: "var(--fgColor-muted)", marginTop: 8 }}
           >
-            GitHub Reviews v{chrome.runtime.getManifest().version} ·{" "}
-            <span style={{ fontFamily: "monospace" }}>{__BUILD_COMMIT__}</span>
+            GitHub Reviews v{chrome.runtime.getManifest().version}
+            {__BUILD_COMMIT__ && (
+              <>
+                {" · "}
+                <span style={{ fontFamily: "monospace" }}>{__BUILD_COMMIT__}</span>
+              </>
+            )}
           </Text>
         </Stack>
       </BaseStyles>
