@@ -1,5 +1,15 @@
 # chrome-extension
 
+## 0.3.0
+
+### Minor Changes
+
+- 1b25b95: Fetch pull requests through the GitHub Search API so PRs in large repos (1,500+ open PRs) and review requests sent to your teams now show up. Failed fetches, inaccessible repos, and rate limits are now reported for each repo instead of showing an empty list (#10).
+
+### Patch Changes
+
+- 8c25256: Hide the commit hash in the popup and settings footers for builds from `main`; only builds from other branches show it.
+
 ## 0.2.1
 
 ### Patch Changes
