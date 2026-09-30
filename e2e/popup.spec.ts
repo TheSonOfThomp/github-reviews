@@ -152,3 +152,51 @@ test("surfaces the SSO authorization error for SSO-protected repos", async ({ op
     "https://github.com/orgs/acme/sso?token=abc123"
   );
 });
+
+const pullsUrl = (repo: string, qualifier: string) =>
+  `https://github.com/${repo}/pulls?q=${encodeURIComponent(`is:pr is:open ${qualifier}:demo-user`)}`;
+
+test(
+  "repo headers link to GitHub's PR list filtered to the active view",
+  // comment-screenshot: publish this test's screenshots to the PR comment
+  { annotation: { type: "comment-screenshot" } },
+  async ({ openPopup }) => {
+    const page = await openPopup();
+    await seedSettings(page, SETTINGS);
+    await page.reload();
+    // Reload once the SW has persisted the username so the header uses it, not @me
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => new Promise((resolve) => chrome.storage.local.get(["githubUsername"], (s) => resolve(s.githubUsername)))
+        )
+      )
+      .toBe("demo-user");
+    await page.reload();
+
+    const review = await settledEntry(page, "review");
+    const header = page.getByRole("link", { name: "acme/widgets", exact: true });
+    await expect(header).toHaveAttribute("href", pullsUrl("acme/widgets", "review-requested"));
+    await expect(header).toHaveAttribute("target", "_blank");
+    if (review.prs.length > 10) {
+      await expect(page.getByRole("link", { name: /more — view all on GitHub/ })).toHaveAttribute(
+        "href",
+        pullsUrl("acme/widgets", "review-requested")
+      );
+    }
+
+    await page.getByRole("button", { name: "My Open PRs" }).click();
+    await settledEntry(page, "mine");
+    await expect(header).toHaveAttribute("href", pullsUrl("acme/widgets", "author"));
+  }
+);
+
+test("errored repos render a plain-text header", async ({ openPopup }) => {
+  const page = await openPopup();
+  await seedSettings(page, { ...SETTINGS, repos: ["acme/sso-org"] });
+  await page.reload();
+
+  await expect(page.getByText("SSO authorization required for acme/sso-org")).toBeVisible();
+  await expect(page.getByText("acme/sso-org", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "acme/sso-org", exact: true })).toHaveCount(0);
+});
