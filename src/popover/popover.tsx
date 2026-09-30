@@ -13,7 +13,7 @@ import {
   IconButton,
   SegmentedControl,
 } from "@primer/react";
-import { GearIcon, GitPullRequestIcon, GitPullRequestDraftIcon, SyncIcon } from "@primer/octicons-react";
+import { GearIcon, GitPullRequestIcon, GitPullRequestDraftIcon, LinkExternalIcon, SyncIcon } from "@primer/octicons-react";
 import type { PullRequest, RepoError } from "../background/fetchPullRequests";
 import { readCache } from "../background/reviewCache";
 
@@ -29,6 +29,17 @@ type ViewMode = "review" | "mine";
 // In DEMO mode with no repos configured, group by the repos the PRs themselves carry
 const uniqueRepos = (prs: PullRequest[]) => Array.from(new Set(prs.map((pr) => pr.repo)));
 
+/**
+ * GitHub PR list for a repo, filtered to match the popover's view (#21).
+ * Uses the token owner's stored username so the page matches the list even
+ * when the browser is signed in to a different account; `@me` until it loads.
+ */
+const filteredPullsUrl = (repo: string, viewMode: ViewMode, username: string | null) => {
+  const qualifier = viewMode === "review" ? "review-requested" : "author";
+  const q = `is:pr is:open ${qualifier}:${username || "@me"}`;
+  return `https://github.com/${repo}/pulls?q=${encodeURIComponent(q)}`;
+};
+
 const arraysEqual = (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
 
 const timeAgo = (fetchedAt: number) => {
@@ -40,10 +51,12 @@ export const PopoverContent = () => {
   const [state, setState] = useState<State>({ status: "loading" });
   const [refreshCount, setRefreshCount] = useState(0);
   const [viewMode, setViewMode] = useState<ViewMode | null>(null);
+  const [username, setUsername] = useState<string | null>(null);
 
   useEffect(() => {
-    chrome.storage.local.get({ viewMode: "review" }, (stored) => {
+    chrome.storage.local.get({ viewMode: "review", githubUsername: null }, (stored) => {
       setViewMode(stored.viewMode as ViewMode);
+      setUsername(stored.githubUsername as string | null);
     });
   }, []);
 
@@ -116,6 +129,9 @@ export const PopoverContent = () => {
           /* Build tag: dimmer/smaller than Primer's muted small text, but still
              WCAG AA (>= 4.5:1) in both themes against bgColor-default:
              light #6a737d on #ffffff = 4.82:1, dark #74808f on #0d1117 = 4.71:1 */
+          /* Repo header link (#21): reads as a muted section label until hover */
+          .repo-header-link { color: var(--fgColor-muted) !important; }
+          .repo-header-link:hover { color: var(--fgColor-accent) !important; }
           .build-tag {
             font-size: 11px;
             line-height: 1.5;
@@ -196,7 +212,7 @@ export const PopoverContent = () => {
           )}
 
           {state.status === "done" && (
-            <PullRequestList prs={state.prs} repos={state.repos} errors={state.errors} viewMode={viewMode!} />
+            <PullRequestList prs={state.prs} repos={state.repos} errors={state.errors} viewMode={viewMode!} username={username} />
           )}
         </Stack>
 
@@ -223,7 +239,19 @@ export const PopoverContent = () => {
   );
 };
 
-const PullRequestList = ({ prs, repos, errors, viewMode }: { prs: PullRequest[]; repos: string[]; errors: RepoError[]; viewMode: ViewMode }) => {
+const PullRequestList = ({
+  prs,
+  repos,
+  errors,
+  viewMode,
+  username,
+}: {
+  prs: PullRequest[];
+  repos: string[];
+  errors: RepoError[];
+  viewMode: ViewMode;
+  username: string | null;
+}) => {
   const byRepo = prs.reduce<Record<string, PullRequest[]>>((acc, pr) => {
     (acc[pr.repo] ??= []).push(pr);
     return acc;
@@ -239,11 +267,33 @@ const PullRequestList = ({ prs, repos, errors, viewMode }: { prs: PullRequest[];
       {repos.map((repo) => {
         const repoPrs = byRepo[repo] ?? [];
         const repoError = errorByRepo[repo];
+        const pullsUrl = filteredPullsUrl(repo, viewMode, username);
         return (
           <Stack key={repo} direction="vertical" gap="condensed">
-            <Text size="small" weight="semibold" style={{ color: "var(--fgColor-muted)" }}>
-              {repo}
-            </Text>
+            {repoError ? (
+              <Text size="small" weight="semibold" style={{ color: "var(--fgColor-muted)" }}>
+                {repo}
+              </Text>
+            ) : (
+              <Link
+                href={pullsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="repo-header-link"
+                title={`${viewMode === "review" ? "Review requests for you" : "Your open PRs"} in ${repo} on GitHub`}
+                style={{
+                  fontSize: "var(--text-body-size-small)",
+                  fontWeight: 600,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  alignSelf: "flex-start",
+                }}
+              >
+                {repo}
+                <LinkExternalIcon size={12} />
+              </Link>
+            )}
             {repoError && (
               <Text size="small" style={{ color: "var(--fgColor-danger)" }}>
                 {repoError.message}{" "}
@@ -291,7 +341,7 @@ const PullRequestList = ({ prs, repos, errors, viewMode }: { prs: PullRequest[];
           ))}
             {repoPrs.length > 10 && (
               <Link
-                href={`https://github.com/${repo}/pulls`}
+                href={pullsUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{ fontSize: "var(--text-body-size-small)" }}
