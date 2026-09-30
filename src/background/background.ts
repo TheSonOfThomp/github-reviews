@@ -4,6 +4,7 @@ import {
   fetchMyOpenPullRequests,
 } from "./fetchPullRequests";
 import { readCache, writeCache, clearCache } from "./reviewCache";
+import { DEFAULT_INCLUDE_TEAM_REQUESTS } from "../settings";
 
 const ALARM_NAME = "poll-pull-requests";
 const POLL_INTERVAL_MINUTES = 5;
@@ -15,6 +16,7 @@ const FRESH_CACHE_MS = POLL_INTERVAL_MINUTES * 60_000;
 let githubToken: string = "";
 let repos: string[] = [];
 let username: string = "";
+let includeTeamRequests: boolean = DEFAULT_INCLUDE_TEAM_REQUESTS;
 
 // Resolved once the module-scope settings above are fully loaded (storage
 // reads only — never network). Anything that fetches with these values must
@@ -52,7 +54,7 @@ async function refreshPullRequests() {
   }
 
   try {
-    const { prs, errors } = await fetchOpenPullRequests(githubToken, repos, username);
+    const { prs, errors } = await fetchOpenPullRequests(githubToken, repos, username, includeTeamRequests);
     updateBadge(prs.length);
     writeCache("review", { prs, errors, repos, fetchedAt: Date.now() });
   } catch (e) {
@@ -66,10 +68,14 @@ async function refreshPullRequests() {
 // when the cache is fresh (the 5-minute alarm owns ongoing refreshes).
 const startSettings = async () => {
   const stored = await new Promise<Record<string, unknown>>((resolve) =>
-    chrome.storage.sync.get({ githubToken: "", repos: [] }, resolve)
+    chrome.storage.sync.get(
+      { githubToken: "", repos: [], includeTeamRequests: DEFAULT_INCLUDE_TEAM_REQUESTS },
+      resolve
+    )
   );
   githubToken = stored.githubToken as string;
   repos = stored.repos as string[];
+  includeTeamRequests = stored.includeTeamRequests as boolean;
   username = await loadCachedUsername();
   if (githubToken && !username) {
     username = await fetchAuthenticatedUser(githubToken).catch(() => "");
@@ -105,7 +111,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.storage.onChanged.addListener(async (changes, area) => {
   if (area !== "sync") return;
   await settingsReady;
-  if (changes.githubToken || changes.repos) {
+  if (changes.githubToken || changes.repos || changes.includeTeamRequests) {
     // Cached PRs belong to the old settings — invalidate
     clearCache();
   }
@@ -121,6 +127,11 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
     repos = changes.repos.newValue ?? [];
     console.log("[BACKGROUND] repos updated:", repos);
   }
+  if (changes.includeTeamRequests) {
+    // A removed key falls back to the default (on), not to false
+    includeTeamRequests = changes.includeTeamRequests.newValue ?? DEFAULT_INCLUDE_TEAM_REQUESTS;
+    console.log("[BACKGROUND] includeTeamRequests updated:", includeTeamRequests);
+  }
   refreshPullRequests();
 });
 
@@ -132,7 +143,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // write guard is unnecessary).
   if (message.action === "GET_PULL_REQUESTS") {
     settingsReady.then(() =>
-      fetchOpenPullRequests(githubToken, repos, username).then(({ prs, errors }) => {
+      fetchOpenPullRequests(githubToken, repos, username, includeTeamRequests).then(({ prs, errors }) => {
         updateBadge(prs.length);
         writeCache("review", { prs, errors, repos, fetchedAt: Date.now() });
         sendResponse({ action: "PULL_REQUESTS", payload: prs, errors });

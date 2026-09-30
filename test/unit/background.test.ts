@@ -23,6 +23,13 @@ function stubGithubApi() {
   });
 }
 
+/** Qualifiers (e.g. `review-requested:octocat`) of every Search API call so far. */
+const searchQualifiers = () =>
+  fetchMock.mock.calls
+    .map(([url]) => url as string)
+    .filter((url) => url.startsWith("https://api.github.com/search/issues"))
+    .map((url) => new URL(url).searchParams.get("q")!.split(" ").pop());
+
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
 let chromeMock: ReturnType<typeof createChromeMock>;
@@ -200,6 +207,75 @@ describe("settings changes", () => {
         CACHE_STORAGE_KEY,
         expect.anything()
       );
+    });
+  });
+});
+
+describe("includeTeamRequests setting (#27)", () => {
+  it("defaults to including team requests when the key was never stored", async () => {
+    chromeMock = createChromeMock({
+      sync: { githubToken: "token", repos: ["acme/widgets"] },
+    });
+    await importBackground();
+
+    await vi.waitFor(() => {
+      expect(searchQualifiers()).toContain("review-requested:octocat");
+    });
+  });
+
+  it("loads the flag on cold start and uses it for the badge refresh and GET_PULL_REQUESTS", async () => {
+    chromeMock = createChromeMock({
+      sync: { githubToken: "token", repos: ["acme/widgets"], includeTeamRequests: false },
+      deferSyncGet: true,
+    });
+    await importBackground();
+    const responsePromise = chromeMock.__sendMessage({ action: "GET_PULL_REQUESTS" });
+    chromeMock.__flushSyncGet();
+    await responsePromise;
+
+    await vi.waitFor(() => {
+      // One search from the startup badge refresh, one from the message
+      expect(searchQualifiers()).toEqual([
+        "user-review-requested:octocat",
+        "user-review-requested:octocat",
+      ]);
+    });
+  });
+
+  it("clears the cache and refetches with the new qualifier when the flag changes", async () => {
+    chromeMock = createChromeMock({
+      sync: { githubToken: "token", repos: ["acme/widgets"] },
+    });
+    await importBackground();
+    await vi.waitFor(() => {
+      expect(chromeMock.__stores.local[CACHE_STORAGE_KEY]).toBeDefined();
+    });
+
+    chromeMock.storage.sync.set({ includeTeamRequests: false });
+
+    await vi.waitFor(() => {
+      expect(chromeMock.storage.local.remove).toHaveBeenCalledWith(
+        CACHE_STORAGE_KEY,
+        expect.anything()
+      );
+      expect(searchQualifiers()).toContain("user-review-requested:octocat");
+    });
+  });
+
+  it("treats a removed key as on, not off", async () => {
+    chromeMock = createChromeMock({
+      sync: { githubToken: "token", repos: ["acme/widgets"], includeTeamRequests: false },
+    });
+    await importBackground();
+    await vi.waitFor(() => {
+      expect(searchQualifiers()).toEqual(["user-review-requested:octocat"]);
+    });
+
+    // newValue undefined is what chrome.storage reports for a removed key
+    chromeMock.storage.sync.set({ includeTeamRequests: undefined });
+
+    await vi.waitFor(() => {
+      expect(searchQualifiers().at(-1)).toBe("review-requested:octocat");
     });
   });
 });

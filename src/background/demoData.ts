@@ -29,14 +29,14 @@ function getDemoRepos(): string[] {
 
 export const DEMO_USERNAME = "demo-user";
 
-// pravatar.cc serves a stable set of numbered placeholder photos (1..70)
-const avatarUrl = () => `https://i.pravatar.cc/80?img=${faker.number.int({ min: 1, max: 70 })}`;
-
-// Stable per-login avatar so the same fake user always gets the same face
-const avatarByLogin = new Map<string, string>();
+// pravatar.cc serves a stable set of numbered placeholder photos (1..70).
+// Hashed from the login rather than drawn from faker, so the same user always
+// gets the same face and avatars never shift the faker sequence (which made
+// a seed's output depend on which logins earlier calls had seen).
 function avatarFor(login: string): string {
-  if (!avatarByLogin.has(login)) avatarByLogin.set(login, avatarUrl());
-  return avatarByLogin.get(login)!;
+  let hash = 0;
+  for (const ch of login) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return `https://i.pravatar.cc/80?img=${(hash % 70) + 1}`;
 }
 
 function fakeUsers(count = 3): Array<{ login: string; avatar_url: string }> {
@@ -46,9 +46,13 @@ function fakeUsers(count = 3): Array<{ login: string; avatar_url: string }> {
   });
 }
 
-// Demo PRs carry their requested reviewers so the demo "search" can filter
-// on them the way GitHub does server-side; the field is stripped on output
-type DemoPull = PullRequest & { requested_reviewers: Array<{ login: string }> };
+// Demo PRs carry their requested reviewers and teams so the demo "search" can
+// filter on them the way GitHub does server-side; the fields are stripped on
+// output. Teams list their members, standing in for GitHub's team membership.
+type DemoPull = PullRequest & {
+  requested_reviewers: Array<{ login: string }>;
+  requested_teams: Array<{ slug: string; members: string[] }>;
+};
 
 function fakePRsForRepo(repo: string, count: number, authorLogin: string): DemoPull[] {
   return Array.from({ length: count }, () => {
@@ -63,6 +67,7 @@ function fakePRsForRepo(repo: string, count: number, authorLogin: string): DemoP
       updated_at: faker.date.recent({ days: 2 }).toISOString(),
       draft: faker.datatype.boolean({ probability: 0.25 }),
       requested_reviewers: fakeUsers(faker.number.int({ min: 1, max: 3 })).map((u) => ({ login: u.login })),
+      requested_teams: [],
       repo,
     };
   });
@@ -73,10 +78,12 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /*
  * All open demo PRs for one repo: PRs requesting the reviewer's review,
- * PRs authored by the demo user, and unrelated PRs that both searches drop.
+ * PRs authored by the demo user, unrelated PRs that every search drops, and
+ * PRs requesting review only from a team the reviewer is on (#27).
  */
 function demoAllPullsForRepo(repo: string, reviewerLogin: string): DemoPull[] {
-  ensureSeed();
+  // No ensureSeed() here: callers own the seed (the DEMO fetchers call it;
+  // the E2E stub seeds per repo), and a first-call reseed would override theirs
   const pulls: DemoPull[] = [];
 
   const reviewCount = faker.number.int({ min: 1, max: 5 });
@@ -91,16 +98,23 @@ function demoAllPullsForRepo(repo: string, reviewerLogin: string): DemoPull[] {
   const noiseCount = faker.number.int({ min: 0, max: 2 });
   pulls.push(...fakePRsForRepo(repo, noiseCount, faker.internet.username()));
 
+  // Generated last so the faker sequence for the PRs above is unchanged
+  const teamCount = faker.number.int({ min: 1, max: 3 });
+  for (let i = 0; i < teamCount; i++) {
+    const [pr] = fakePRsForRepo(repo, 1, faker.internet.username());
+    pulls.push({ ...pr, requested_teams: [{ slug: "demo-team", members: [reviewerLogin] }] });
+  }
+
   return pulls;
 }
 
-export type DemoSearchQualifier = "review-requested" | "author";
+export type DemoSearchQualifier = "review-requested" | "user-review-requested" | "author";
 
 /*
  * Search-API-style result items for one repo — shared by the DEMO-mode
  * fetchers and the E2E GitHub stub (e2e/stub/server.ts) so both serve the
- * same data, filtered the way GitHub's `review-requested:` / `author:`
- * qualifiers would.
+ * same data, filtered the way GitHub's `review-requested:` (direct or team),
+ * `user-review-requested:` (direct only) and `author:` qualifiers would.
  */
 export function demoSearchPullsForRepo(
   repo: string,
@@ -108,12 +122,13 @@ export function demoSearchPullsForRepo(
   login: string
 ): PullRequest[] {
   return demoAllPullsForRepo(repo, login)
-    .filter((pr) =>
-      qualifier === "author"
-        ? pr.user.login === login
-        : pr.requested_reviewers.some((r) => r.login === login)
-    )
-    .map(({ requested_reviewers: _, ...pr }) => pr);
+    .filter((pr) => {
+      if (qualifier === "author") return pr.user.login === login;
+      const direct = pr.requested_reviewers.some((r) => r.login === login);
+      if (qualifier === "user-review-requested") return direct;
+      return direct || pr.requested_teams.some((t) => t.members.includes(login));
+    })
+    .map(({ requested_reviewers: _r, requested_teams: _t, ...pr }) => pr);
 }
 
 export async function demoFetchAuthenticatedUser(): Promise<string> {
@@ -124,13 +139,15 @@ export async function demoFetchAuthenticatedUser(): Promise<string> {
 export async function demoFetchOpenPullRequests(
   _githubToken: string,
   repos: string[],
-  username: string
+  username: string,
+  includeTeamRequests: boolean
 ): Promise<FetchPullRequestsResult> {
   ensureSeed();
   await delay(200);
   const useRepos = repos.length ? repos : getDemoRepos();
   const user = username || DEMO_USERNAME;
-  const prs = useRepos.flatMap((repo) => demoSearchPullsForRepo(repo, "review-requested", user));
+  const qualifier = includeTeamRequests ? "review-requested" : "user-review-requested";
+  const prs = useRepos.flatMap((repo) => demoSearchPullsForRepo(repo, qualifier, user));
   return { prs, errors: [] };
 }
 
