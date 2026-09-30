@@ -13,17 +13,21 @@ import {
   Stack,
   IconButton,
   Link,
+  ToggleSwitch,
 } from "@primer/react";
 import { XIcon, EyeIcon, EyeClosedIcon, GrabberIcon, CheckCircleFillIcon } from "@primer/octicons-react";
+import { DEFAULT_INCLUDE_TEAM_REQUESTS } from "../settings";
 
 interface Settings {
   githubToken: string;
   repos: string[];
+  includeTeamRequests: boolean;
 }
 
 const defaultSettings: Settings = {
   githubToken: "",
   repos: [],
+  includeTeamRequests: DEFAULT_INCLUDE_TEAM_REQUESTS,
 };
 
 export const OptionsPage = () => {
@@ -76,6 +80,12 @@ export const OptionsPage = () => {
       ...settings,
       repos: settings.repos.filter((r) => r !== repo),
     };
+    setSettings(updated);
+    saveSettings(updated);
+  };
+
+  const handleToggleTeamRequests = () => {
+    const updated = { ...settings, includeTeamRequests: !settings.includeTeamRequests };
     setSettings(updated);
     saveSettings(updated);
   };
@@ -256,6 +266,26 @@ export const OptionsPage = () => {
               Add repos in <code>owner/repo</code> format.
             </FormControl.Caption>
           </FormControl>
+
+          {/* ToggleSwitch isn't a native input, so FormControl can't wire its
+              label and caption — connect them explicitly */}
+          <Stack direction="horizontal" gap="normal" align="start" justify="space-between">
+            <Stack direction="vertical" gap="none">
+              <Text id="team-requests-label" weight="semibold" size="medium">
+                Include PRs requested from my teams
+              </Text>
+              <Text id="team-requests-caption" size="small" style={{ color: "var(--fgColor-muted)" }}>
+                When off, only PRs where you were requested directly are shown.
+              </Text>
+            </Stack>
+            <ToggleSwitch
+              checked={settings.includeTeamRequests}
+              onClick={handleToggleTeamRequests}
+              aria-labelledby="team-requests-label"
+              aria-describedby="team-requests-caption"
+              size="small"
+            />
+          </Stack>
 
           <Stack direction="horizontal" gap="normal" align="center">
             <Button variant="primary" onClick={handleSave}>

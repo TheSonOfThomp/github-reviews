@@ -48,7 +48,8 @@ export async function fetchAuthenticatedUser(githubToken: string): Promise<strin
 /*
  * Search-API query per repo. GitHub filters server-side, so large repos
  * (e.g. 10gen/mms, 1500+ open PRs) no longer lose matches past the first
- * page of /pulls (#10). `review-requested:` also matches team requests.
+ * page of /pulls (#10). `review-requested:` also matches team requests;
+ * `user-review-requested:` matches only direct, individual ones (#27).
  */
 export const searchUrl = (repo: string, qualifier: string) =>
   `https://api.github.com/search/issues?q=${encodeURIComponent(
@@ -80,7 +81,7 @@ async function fetchPRsFromRepos(
   githubToken: string,
   repos: string[],
   username: string,
-  qualifierKey: "review-requested" | "author",
+  qualifierKey: "review-requested" | "user-review-requested" | "author",
   logLabel: string
 ): Promise<FetchPullRequestsResult> {
   if (!githubToken) {
@@ -153,14 +154,16 @@ async function fetchPRsFromRepos(
 export async function fetchOpenPullRequests(
   githubToken: string,
   repos: string[],
-  username: string
+  username: string,
+  includeTeamRequests: boolean
 ): Promise<FetchPullRequestsResult> {
-  if (process.env.DEMO_MODE === "true") return demoFetchOpenPullRequests(githubToken, repos, username);
+  if (process.env.DEMO_MODE === "true")
+    return demoFetchOpenPullRequests(githubToken, repos, username, includeTeamRequests);
   return fetchPRsFromRepos(
     githubToken,
     repos,
     username,
-    "review-requested",
+    includeTeamRequests ? "review-requested" : "user-review-requested",
     "PRs awaiting review"
   );
 }
