@@ -187,6 +187,11 @@ test(
     for (const pr of directOnly.prs.slice(0, 3)) {
       await expect(page.getByRole("link", { name: new RegExp(`^#${pr.number} `) })).toBeVisible();
     }
+    // The repo header's GitHub link applies the same filter (#21)
+    await expect(page.getByRole("link", { name: "acme/widgets", exact: true })).toHaveAttribute(
+      "href",
+      pullsUrl("acme/widgets", "user-review-requested")
+    );
   }
 );
 

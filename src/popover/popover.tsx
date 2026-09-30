@@ -16,6 +16,7 @@ import {
 import { GearIcon, GitPullRequestIcon, GitPullRequestDraftIcon, LinkExternalIcon, SyncIcon } from "@primer/octicons-react";
 import type { PullRequest, RepoError } from "../background/fetchPullRequests";
 import { readCache } from "../background/reviewCache";
+import { DEFAULT_INCLUDE_TEAM_REQUESTS } from "../settings";
 
 type State =
   | { status: "loading" }
@@ -33,9 +34,16 @@ const uniqueRepos = (prs: PullRequest[]) => Array.from(new Set(prs.map((pr) => p
  * GitHub PR list for a repo, filtered to match the popover's view (#21).
  * Uses the token owner's stored username so the page matches the list even
  * when the browser is signed in to a different account; `@me` until it loads.
+ * The review qualifier follows the team-requests setting, like the fetch (#27).
  */
-const filteredPullsUrl = (repo: string, viewMode: ViewMode, username: string | null) => {
-  const qualifier = viewMode === "review" ? "review-requested" : "author";
+const filteredPullsUrl = (
+  repo: string,
+  viewMode: ViewMode,
+  username: string | null,
+  includeTeamRequests: boolean
+) => {
+  const reviewQualifier = includeTeamRequests ? "review-requested" : "user-review-requested";
+  const qualifier = viewMode === "review" ? reviewQualifier : "author";
   const q = `is:pr is:open ${qualifier}:${username || "@me"}`;
   return `https://github.com/${repo}/pulls?q=${encodeURIComponent(q)}`;
 };
@@ -52,6 +60,7 @@ export const PopoverContent = () => {
   const [refreshCount, setRefreshCount] = useState(0);
   const [viewMode, setViewMode] = useState<ViewMode | null>(null);
   const [username, setUsername] = useState<string | null>(null);
+  const [includeTeamRequests, setIncludeTeamRequests] = useState(DEFAULT_INCLUDE_TEAM_REQUESTS);
 
   useEffect(() => {
     chrome.storage.local.get({ viewMode: "review", githubUsername: null }, (stored) => {
@@ -68,7 +77,9 @@ export const PopoverContent = () => {
   useEffect(() => {
     if (viewMode === null) return;
     setState({ status: "loading" });
-    chrome.storage.sync.get({ githubToken: "", repos: [] }, (stored) => {
+    const syncDefaults = { githubToken: "", repos: [], includeTeamRequests: DEFAULT_INCLUDE_TEAM_REQUESTS };
+    chrome.storage.sync.get(syncDefaults, (stored) => {
+      setIncludeTeamRequests(stored.includeTeamRequests as boolean);
       // DEMO mode bypasses the settings guards so demo data renders unconfigured.
       // NOTE: keep negated flag checks as `!== "true"` — a bare
       // `!process.env.DEMO_MODE` folds to constant false in production builds
@@ -215,7 +226,7 @@ export const PopoverContent = () => {
           )}
 
           {state.status === "done" && (
-            <PullRequestList prs={state.prs} repos={state.repos} errors={state.errors} viewMode={viewMode!} username={username} />
+            <PullRequestList prs={state.prs} repos={state.repos} errors={state.errors} viewMode={viewMode!} username={username} includeTeamRequests={includeTeamRequests} />
           )}
         </Stack>
 
@@ -248,12 +259,14 @@ const PullRequestList = ({
   errors,
   viewMode,
   username,
+  includeTeamRequests,
 }: {
   prs: PullRequest[];
   repos: string[];
   errors: RepoError[];
   viewMode: ViewMode;
   username: string | null;
+  includeTeamRequests: boolean;
 }) => {
   const byRepo = prs.reduce<Record<string, PullRequest[]>>((acc, pr) => {
     (acc[pr.repo] ??= []).push(pr);
@@ -270,7 +283,7 @@ const PullRequestList = ({
       {repos.map((repo) => {
         const repoPrs = byRepo[repo] ?? [];
         const repoError = errorByRepo[repo];
-        const pullsUrl = filteredPullsUrl(repo, viewMode, username);
+        const pullsUrl = filteredPullsUrl(repo, viewMode, username, includeTeamRequests);
         return (
           <Stack key={repo} direction="vertical" gap="condensed">
             {repoError ? (
