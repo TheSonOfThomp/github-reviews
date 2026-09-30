@@ -132,6 +132,9 @@ export const PopoverContent = () => {
           /* Repo header link (#21): reads as a muted section label until hover */
           .repo-header-link { color: var(--fgColor-muted) !important; }
           .repo-header-link:hover { color: var(--fgColor-accent) !important; }
+          /* Icon reserves its space (no layout shift) and appears on hover/keyboard focus */
+          .repo-header-link svg { opacity: 0; transition: opacity 80ms; }
+          .repo-header-link:hover svg, .repo-header-link:focus-visible svg { opacity: 1; }
           .build-tag {
             font-size: 11px;
             line-height: 1.5;
