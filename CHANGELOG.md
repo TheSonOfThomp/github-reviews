@@ -1,5 +1,12 @@
 # chrome-extension
 
+## 0.3.1
+
+### Patch Changes
+
+- c491690: Repo headers in the popup now link to that repo's GitHub PR list, filtered to your review requests or your open PRs to match the active tab. The "+N more" link uses the same filter (#21).
+- 5a28f3a: Add an "Include PRs requested from my teams" setting. When it's off, the Review view and badge show only PRs where you were requested directly (#27).
+
 ## 0.3.0
 
 ### Minor Changes
