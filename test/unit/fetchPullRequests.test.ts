@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   fetchAuthenticatedUser,
+  fetchCIStatuses,
   fetchOpenPullRequests,
   fetchMyOpenPullRequests,
+  rollupStateToCIStatus,
   searchUrl,
   type PullRequest,
 } from "../../src/background/fetchPullRequests";
@@ -235,6 +237,143 @@ describe("fetchOpenPullRequests", () => {
       { repo: "acme/failing", message: "Failed to fetch acme/failing: network down" },
     ]);
     error.mockRestore();
+  });
+});
+
+/** GraphQL response body mapping node IDs to statusCheckRollup states. */
+const graphqlBody = (states: Record<string, string | null>) => ({
+  data: {
+    nodes: Object.entries(states).map(([id, state]) => ({
+      id,
+      commits: { nodes: [{ commit: { statusCheckRollup: { state } } }] },
+    })),
+  },
+});
+
+describe("rollupStateToCIStatus", () => {
+  it("maps combined rollup states onto icon states", () => {
+    expect(rollupStateToCIStatus("SUCCESS")).toBe("success");
+    expect(rollupStateToCIStatus("FAILURE")).toBe("failure");
+    expect(rollupStateToCIStatus("ERROR")).toBe("failure");
+    expect(rollupStateToCIStatus("PENDING")).toBe("pending");
+    expect(rollupStateToCIStatus("EXPECTED")).toBe("pending");
+    expect(rollupStateToCIStatus(null)).toBeUndefined();
+    expect(rollupStateToCIStatus(undefined)).toBeUndefined();
+  });
+});
+
+describe("fetchCIStatuses", () => {
+  it("batches all PRs into one GraphQL nodes(ids:) query and maps states", async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeResponse({ body: graphqlBody({ n1: "SUCCESS", n2: "FAILURE", n3: "PENDING", n4: null }) })
+    );
+
+    const statuses = await fetchCIStatuses("token", [
+      pr(1, { node_id: "n1" }),
+      pr(2, { node_id: "n2" }),
+      pr(3, { node_id: "n3" }),
+      pr(4, { node_id: "n4" }),
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.github.com/graphql");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body).variables.ids).toEqual(["n1", "n2", "n3", "n4"]);
+    expect(Object.fromEntries(statuses)).toEqual({ n1: "success", n2: "failure", n3: "pending" });
+  });
+
+  it("chunks IDs into batches of 100", async () => {
+    const prs = Array.from({ length: 150 }, (_, i) => pr(i, { node_id: `n${i}` }));
+    fetchMock.mockImplementation(async () => makeResponse({ body: graphqlBody({}) }));
+
+    await fetchCIStatuses("token", prs);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const firstIds = JSON.parse(fetchMock.mock.calls[0][1].body).variables.ids;
+    const secondIds = JSON.parse(fetchMock.mock.calls[1][1].body).variables.ids;
+    expect(firstIds).toHaveLength(100);
+    expect(secondIds).toHaveLength(50);
+  });
+
+  it("skips the request entirely when no PR carries a node_id", async () => {
+    const statuses = await fetchCIStatuses("token", [pr(1), pr(2)]);
+    expect(statuses.size).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("CI status enrichment in fetchOpenPullRequests", () => {
+  const items = [pr(1, { node_id: "n1" }), pr(2, { node_id: "n2" })];
+
+  it("attaches ci_status to the search results", async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      url.startsWith("https://api.github.com/search")
+        ? makeResponse({ body: searchBody(items) })
+        : makeResponse({ body: graphqlBody({ n1: "SUCCESS", n2: "ERROR" }) })
+    );
+
+    const { prs, errors } = await fetchOpenPullRequests("token", ["acme/widgets"], "octocat");
+
+    expect(errors).toEqual([]);
+    expect(prs.map((p) => p.ci_status)).toEqual(["success", "failure"]);
+  });
+
+  it("leaves the PR list intact when the GraphQL request is rate-limited", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    fetchMock.mockImplementation(async (url: string) =>
+      url.startsWith("https://api.github.com/search")
+        ? makeResponse({ body: searchBody(items) })
+        : makeResponse({
+            ok: false,
+            status: 403,
+            statusText: "Forbidden",
+            headers: { "x-ratelimit-remaining": "0" },
+          })
+    );
+
+    const { prs, errors } = await fetchOpenPullRequests("token", ["acme/widgets"], "octocat");
+
+    expect(errors).toEqual([]);
+    expect(prs).toHaveLength(2);
+    expect(prs.every((p) => p.ci_status === undefined)).toBe(true);
+    expect(warn).toHaveBeenCalledWith(
+      "[BACKGROUND] CI status lookup failed; rendering PRs without CI icons:",
+      expect.objectContaining({ message: "GitHub GraphQL rate limit hit" })
+    );
+    warn.mockRestore();
+  });
+
+  it("leaves the PR list intact when GraphQL returns query errors (e.g. missing scopes)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    fetchMock.mockImplementation(async (url: string) =>
+      url.startsWith("https://api.github.com/search")
+        ? makeResponse({ body: searchBody(items) })
+        : makeResponse({ body: { errors: [{ message: "Field 'statusCheckRollup' requires scope" }] } })
+    );
+
+    const { prs, errors } = await fetchOpenPullRequests("token", ["acme/widgets"], "octocat");
+
+    expect(errors).toEqual([]);
+    expect(prs).toHaveLength(2);
+    expect(prs.every((p) => p.ci_status === undefined)).toBe(true);
+    warn.mockRestore();
+  });
+
+  it("leaves the PR list intact when the GraphQL fetch rejects", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.startsWith("https://api.github.com/search")) {
+        return makeResponse({ body: searchBody(items) });
+      }
+      throw new Error("network down");
+    });
+
+    const { prs, errors } = await fetchOpenPullRequests("token", ["acme/widgets"], "octocat");
+
+    expect(errors).toEqual([]);
+    expect(prs).toHaveLength(2);
+    warn.mockRestore();
   });
 });
 

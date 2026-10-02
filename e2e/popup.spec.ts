@@ -49,24 +49,44 @@ test("popup shows the no-token guard when no settings are configured", async ({ 
   await expect(page.locator("a[title^='#']")).toHaveCount(0);
 });
 
-test("renders demo-data PRs and writes them to the cache", async ({ openPopup, stub }) => {
-  const page = await openPopup();
-  await seedSettings(page, SETTINGS);
-  await page.reload();
+test(
+  "renders demo-data PRs and writes them to the cache",
+  // comment-screenshot: publish this test's screenshots to the PR comment
+  { annotation: { type: "comment-screenshot" } },
+  async ({ openPopup, stub }) => {
+    const page = await openPopup();
+    await seedSettings(page, SETTINGS);
+    await page.reload();
 
-  await expect(page.getByText("acme/widgets")).toBeVisible();
-  const entry = await settledEntry(page, "review");
+    await expect(page.getByText("acme/widgets")).toBeVisible();
+    const entry = await settledEntry(page, "review");
 
-  expect(entry.errors).toEqual([]);
-  expect(entry.repos).toEqual(["acme/widgets"]);
-  // The review view searched server-side for the demo user's review requests
-  expect(entry.prs.length).toBeGreaterThan(0);
-  expect(stub.searchQueries).toContain("repo:acme/widgets is:pr is:open review-requested:demo-user");
+    expect(entry.errors).toEqual([]);
+    expect(entry.repos).toEqual(["acme/widgets"]);
+    // The review view searched server-side for the demo user's review requests
+    expect(entry.prs.length).toBeGreaterThan(0);
+    expect(stub.searchQueries).toContain("repo:acme/widgets is:pr is:open review-requested:demo-user");
 
-  for (const pr of entry.prs.slice(0, 3)) {
-    await expect(page.getByRole("link", { name: new RegExp(`^#${pr.number} `) })).toBeVisible();
+    for (const pr of entry.prs.slice(0, 3)) {
+      await expect(page.getByRole("link", { name: new RegExp(`^#${pr.number} `) })).toBeVisible();
+    }
+
+    // CI status (#32): one batched GraphQL lookup per refresh, icons only
+    // for PRs whose head commit has checks, each linking to the checks page
+    expect(stub.graphqlIdBatches.length).toBeGreaterThan(0);
+    expect(stub.graphqlIdBatches.every((ids) => ids.length <= 100)).toBe(true);
+    const visiblePrs = entry.prs.slice(0, 10);
+    const withCI = visiblePrs.filter((pr) => pr.ci_status);
+    expect(withCI.length).toBeGreaterThan(0);
+    await expect(page.getByRole("link", { name: /^CI: / })).toHaveCount(withCI.length);
+    for (const pr of withCI) {
+      await expect(
+        page.getByRole("link", { name: /^CI: / }).filter({ has: page.locator("svg") })
+      ).toHaveCount(withCI.length); // sanity: every CI link carries an icon
+      await expect(page.locator(`a[href="${pr.html_url}/checks"]`)).toBeVisible();
+    }
   }
-});
+);
 
 test("renders the cached list first, then revalidates in the background", async ({
   openPopup,
@@ -138,6 +158,11 @@ test(
     // And it is a different set from the review view
     const reviewNumbers = new Set(review.prs.map((pr) => pr.number));
     expect(mine.prs.some((pr) => !reviewNumbers.has(pr.number))).toBe(true);
+
+    // CI status icons appear in the My Open PRs view too (#32)
+    const mineWithCI = mine.prs.slice(0, 10).filter((pr) => pr.ci_status);
+    expect(mineWithCI.length).toBeGreaterThan(0);
+    await expect(page.getByRole("link", { name: /^CI: / })).toHaveCount(mineWithCI.length);
   }
 );
 

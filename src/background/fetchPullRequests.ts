@@ -4,8 +4,13 @@ import {
   demoFetchOpenPullRequests,
 } from "./demoData";
 
+export type CIStatus = "success" | "failure" | "pending";
+
 export interface PullRequest {
   id: number;
+  // GraphQL node ID, present on Search API items; used to batch the CI
+  // status lookup. Optional so older cache entries stay readable.
+  node_id?: string;
   number: number;
   title: string;
   html_url: string;
@@ -14,6 +19,8 @@ export interface PullRequest {
   updated_at: string;
   draft: boolean;
   repo: string;
+  /** Combined check/status state of the head commit; undefined = no checks (or lookup failed). */
+  ci_status?: CIStatus;
 }
 
 export interface RepoError {
@@ -54,6 +61,94 @@ export const searchUrl = (repo: string, qualifier: string) =>
   `https://api.github.com/search/issues?q=${encodeURIComponent(
     `repo:${repo} is:pr is:open ${qualifier}`
   )}&per_page=100`;
+
+const GRAPHQL_URL = "https://api.github.com/graphql";
+// nodes(ids:) accepts at most 100 IDs per query
+const GRAPHQL_IDS_PER_QUERY = 100;
+
+const CI_STATUS_QUERY = `
+  query ($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on PullRequest {
+        id
+        commits(last: 1) {
+          nodes { commit { statusCheckRollup { state } } }
+        }
+      }
+    }
+  }
+`;
+
+type StatusCheckRollupState = "SUCCESS" | "FAILURE" | "ERROR" | "PENDING" | "EXPECTED";
+
+/** Maps the combined statusCheckRollup state onto the popover's icon states. */
+export const rollupStateToCIStatus = (state: StatusCheckRollupState | null | undefined): CIStatus | undefined => {
+  switch (state) {
+    case "SUCCESS":
+      return "success";
+    case "FAILURE":
+    case "ERROR":
+      return "failure";
+    case "PENDING":
+    case "EXPECTED":
+      return "pending";
+    default: // null — the commit has no checks configured
+      return undefined;
+  }
+};
+
+interface GraphQLNode {
+  id?: string;
+  commits?: { nodes?: Array<{ commit?: { statusCheckRollup?: { state?: StatusCheckRollupState } | null } }> };
+}
+
+/*
+ * Batched CI status lookup (#32). Search items are issue-shaped and carry
+ * no check data, but they do carry `node_id`, so one GraphQL nodes(ids:)
+ * query per 100 PRs resolves every head commit's statusCheckRollup — far
+ * cheaper than 2–3 REST calls per PR, and it uses the GraphQL rate-limit
+ * budget (separate from search's 30 req/min). Returns node_id → CIStatus.
+ */
+export async function fetchCIStatuses(
+  githubToken: string,
+  prs: PullRequest[]
+): Promise<Map<string, CIStatus>> {
+  const statuses = new Map<string, CIStatus>();
+  const ids = prs.map((pr) => pr.node_id).filter((id): id is string => Boolean(id));
+  for (let i = 0; i < ids.length; i += GRAPHQL_IDS_PER_QUERY) {
+    const chunk = ids.slice(i, i + GRAPHQL_IDS_PER_QUERY);
+    const response = await fetch(GRAPHQL_URL, {
+      method: "POST",
+      headers: { ...githubHeaders(githubToken), "Content-Type": "application/json" },
+      body: JSON.stringify({ query: CI_STATUS_QUERY, variables: { ids: chunk } }),
+    });
+
+    if (!response.ok) {
+      const rateLimited =
+        (response.status === 403 || response.status === 429) &&
+        response.headers.get("x-ratelimit-remaining") === "0";
+      throw new Error(
+        rateLimited
+          ? "GitHub GraphQL rate limit hit"
+          : `GitHub GraphQL error: ${response.status} ${response.statusText}`
+      );
+    }
+
+    const data: { data?: { nodes?: GraphQLNode[] }; errors?: Array<{ message: string }> } =
+      await response.json();
+    // GraphQL returns 200 for query-level errors (e.g. missing token scopes)
+    if (data.errors?.length || !data.data?.nodes) {
+      throw new Error(`GitHub GraphQL error: ${data.errors?.map((e) => e.message).join("; ") ?? "no data"}`);
+    }
+
+    for (const node of data.data.nodes) {
+      const state = node?.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state;
+      const status = rollupStateToCIStatus(state);
+      if (node?.id && status) statuses.set(node.id, status);
+    }
+  }
+  return statuses;
+}
 
 function errorForResponse(repo: string, response: Response): RepoError {
   // Detect SSO enforcement — GitHub returns a URL to authorize the token
@@ -143,6 +238,19 @@ async function fetchPRsFromRepos(
       errors.push({ repo, message: `Failed to fetch ${repo}: ${reason}` });
     }
   });
+
+  // Attach CI statuses from the batched GraphQL lookup. A failed lookup
+  // (network, rate limit, token missing the Checks/Commit statuses scope)
+  // must not fail the refresh — render the PRs without icons instead (#32).
+  try {
+    const statuses = await fetchCIStatuses(githubToken, prs);
+    for (const pr of prs) {
+      const status = pr.node_id ? statuses.get(pr.node_id) : undefined;
+      if (status) pr.ci_status = status;
+    }
+  } catch (e) {
+    console.warn("[BACKGROUND] CI status lookup failed; rendering PRs without CI icons:", e);
+  }
 
   console.log(
     `[BACKGROUND] ${prs.length} ${logLabel} across ${repos.length} repo(s), ${errors.length} error(s)`

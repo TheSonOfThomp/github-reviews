@@ -189,7 +189,7 @@ export const OptionsPage = () => {
               lineHeight: 1.6,
             }}>
               <strong>Classic PAT</strong> — use the <code>repo</code> scope. Required for SSO-protected orgs (authorize per org via <em>Configure SSO</em> on the token page).<br />
-              <strong>Fine-grained PAT</strong> — set <em>Resource owner</em> to the org, grant <em>Pull requests: Read</em>. Not supported by all orgs.
+              <strong>Fine-grained PAT</strong> — set <em>Resource owner</em> to the org, grant <em>Pull requests: Read</em>, plus <em>Commit statuses: Read</em> and <em>Checks: Read</em> for the CI status icons. Not supported by all orgs.
             </aside>
 
           <FormControl>

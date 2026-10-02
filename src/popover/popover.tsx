@@ -13,8 +13,8 @@ import {
   IconButton,
   SegmentedControl,
 } from "@primer/react";
-import { GearIcon, GitPullRequestIcon, GitPullRequestDraftIcon, SyncIcon } from "@primer/octicons-react";
-import type { PullRequest, RepoError } from "../background/fetchPullRequests";
+import { CheckIcon, DotFillIcon, GearIcon, GitPullRequestIcon, GitPullRequestDraftIcon, SyncIcon, XIcon } from "@primer/octicons-react";
+import type { CIStatus, PullRequest, RepoError } from "../background/fetchPullRequests";
 import { readCache } from "../background/reviewCache";
 
 type State =
@@ -34,6 +34,32 @@ const arraysEqual = (a: string[], b: string[]) => a.length === b.length && a.eve
 const timeAgo = (fetchedAt: number) => {
   const minutes = Math.max(1, Math.round((Date.now() - fetchedAt) / 60000));
   return minutes < 60 ? `${minutes}m ago` : `${Math.round(minutes / 60)}h ago`;
+};
+
+// Shared CI status icon for both views (#32). Colors come from Primer
+// functional tokens, so light/dark themes both work.
+const CI_STATUS_META: Record<CIStatus, { Icon: typeof CheckIcon; color: string; label: string }> = {
+  success: { Icon: CheckIcon, color: "var(--fgColor-success)", label: "CI: passing" },
+  failure: { Icon: XIcon, color: "var(--fgColor-danger)", label: "CI: failing" },
+  pending: { Icon: DotFillIcon, color: "var(--fgColor-attention)", label: "CI: pending" },
+};
+
+const CIStatusLink = ({ pr }: { pr: PullRequest }) => {
+  // No checks configured on the head commit (or the lookup failed) → no icon
+  if (!pr.ci_status) return null;
+  const { Icon, color, label } = CI_STATUS_META[pr.ci_status];
+  return (
+    <Link
+      href={`${pr.html_url}/checks`}
+      title={label}
+      aria-label={label}
+      target="_blank"
+      rel="noopener noreferrer"
+      style={{ flexShrink: 0, color, display: "flex" }}
+    >
+      <Icon size={16} />
+    </Link>
+  );
 };
 
 export const PopoverContent = () => {
@@ -287,6 +313,7 @@ const PullRequestList = ({ prs, repos, errors, viewMode }: { prs: PullRequest[];
               >
                 #{pr.number} {pr.title}
               </Link>
+              <CIStatusLink pr={pr} />
             </Stack>
           ))}
             {repoPrs.length > 10 && (

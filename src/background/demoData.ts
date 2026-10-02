@@ -1,5 +1,5 @@
 import { faker } from "@faker-js/faker";
-import type { FetchPullRequestsResult, PullRequest } from "./fetchPullRequests";
+import type { CIStatus, FetchPullRequestsResult, PullRequest } from "./fetchPullRequests";
 
 // Seed lazily (not at module top level) so the module has no initialization
 // side effects that could defeat tree-shaking in production builds
@@ -50,11 +50,24 @@ function fakeUsers(count = 3): Array<{ login: string; avatar_url: string }> {
 // on them the way GitHub does server-side; the field is stripped on output
 type DemoPull = PullRequest & { requested_reviewers: Array<{ login: string }> };
 
+// A realistic mix of CI states for the demo (#32): mostly passing, some
+// failing or pending, and the occasional PR with no checks configured
+function fakeCIStatus(): CIStatus | undefined {
+  const roll = faker.number.int({ min: 1, max: 10 });
+  if (roll <= 6) return "success";
+  if (roll <= 8) return "failure";
+  if (roll <= 9) return "pending";
+  return undefined;
+}
+
 function fakePRsForRepo(repo: string, count: number, authorLogin: string): DemoPull[] {
   return Array.from({ length: count }, () => {
     const number = faker.number.int({ min: 100, max: 9999 });
+    const id = faker.number.int({ min: 1_000_000, max: 9_999_999 });
     return {
-      id: faker.number.int({ min: 1_000_000, max: 9_999_999 }),
+      id,
+      node_id: `PR_node_${id}`,
+      ci_status: fakeCIStatus(),
       number,
       title: faker.hacker.phrase(),
       html_url: `https://github.com/${repo}/pull/${number}`,
