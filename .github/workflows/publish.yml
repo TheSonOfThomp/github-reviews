@@ -13,9 +13,30 @@ jobs:
       contents: write
       pull-requests: write
     outputs:
-      published: ${{ steps.changesets.outputs.published }}
+      # changesets' `published` output is never true for this repo: the
+      # release script is `changeset tag`, which publishes nothing for a
+      # private package (no tags are ever created). Gate the store publish
+      # on the version bump itself — the merge of a Version Packages PR.
+      versionChanged: ${{ steps.bump.outputs.changed }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # need HEAD^ to diff the version
+
+      - name: Detect version bump
+        id: bump
+        run: |
+          if [ "$(git rev-list --count HEAD)" -lt 2 ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          old=$(git show HEAD^:package.json | jq -r .version)
+          new=$(jq -r .version package.json)
+          if [ "$old" != "$new" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: pnpm/action-setup@v4
         with:
@@ -43,7 +64,7 @@ jobs:
 
   publish:
     needs: version
-    if: needs.version.outputs.published == 'true'
+    if: needs.version.outputs.versionChanged == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -72,10 +93,11 @@ jobs:
         run: cd build && zip -r ../extension.zip .
 
       - name: Publish to Chrome Web Store
-        uses: mnao305/chrome-extension-upload@v5.0.0
+        uses: mnao305/chrome-extension-upload@v7.0.0
         with:
           file-path: extension.zip
           extension-id: ${{ secrets.EXTENSION_ID }}
+          publisher-id: ${{ secrets.GOOGLE_PUBLISHER_ID }}
           client-id: ${{ secrets.GOOGLE_CLIENT_ID }}
           client-secret: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           refresh-token: ${{ secrets.GOOGLE_REFRESH_TOKEN }}

@@ -33,10 +33,11 @@ jobs:
         run: cd build && zip -r ../extension.zip .
 
       - name: Publish to Chrome Web Store
-        uses: mnao305/chrome-extension-upload@v5.0.0
+        uses: mnao305/chrome-extension-upload@v7.0.0
         with:
           file-path: extension.zip
           extension-id: ${{ secrets.EXTENSION_ID }}
+          publisher-id: ${{ secrets.GOOGLE_PUBLISHER_ID }}
           client-id: ${{ secrets.GOOGLE_CLIENT_ID }}
           client-secret: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           refresh-token: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
