@@ -37,7 +37,7 @@ jobs:
         with:
           file-path: extension.zip
           extension-id: ${{ secrets.EXTENSION_ID }}
-          publisher-id: ${{ secrets.PUBLISHER_ID }}
+          publisher-id: ${{ secrets.GOOGLE_PUBLISHER_ID }}
           client-id: ${{ secrets.GOOGLE_CLIENT_ID }}
           client-secret: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           refresh-token: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
