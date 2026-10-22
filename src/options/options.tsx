@@ -15,7 +15,7 @@ import {
   Link,
   ToggleSwitch,
 } from "@primer/react";
-import { XIcon, EyeIcon, EyeClosedIcon, GrabberIcon, CheckCircleFillIcon } from "@primer/octicons-react";
+import { XIcon, EyeIcon, EyeClosedIcon, GrabberIcon, CheckCircleFillIcon, LinkExternalIcon } from "@primer/octicons-react";
 import { DEFAULT_INCLUDE_TEAM_REQUESTS } from "../settings";
 
 interface Settings {
@@ -241,6 +241,16 @@ export const OptionsPage = () => {
                     {repo}
                   </Text>
                   <IconButton
+                    icon={LinkExternalIcon}
+                    aria-label={`Open ${repo} on GitHub`}
+                    size="small"
+                    variant="invisible"
+                    as="a"
+                    href={`https://github.com/${repo}/pulls`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  />
+                  <IconButton
                     icon={XIcon}
                     aria-label={`Remove ${repo}`}
                     size="small"
@@ -293,18 +303,31 @@ export const OptionsPage = () => {
             </Button>
           </Stack>
 
-          <Text
-            size="small"
-            style={{ color: "var(--fgColor-muted)", marginTop: 8 }}
-          >
-            GitHub Reviews v{chrome.runtime.getManifest().version}
-            {__BUILD_COMMIT__ && (
-              <>
-                {" · "}
-                <span style={{ fontFamily: "monospace" }}>{__BUILD_COMMIT__}</span>
-              </>
-            )}
-          </Text>
+          <Stack direction="horizontal" gap="condensed" align="center" style={{ marginTop: 8 }}>
+            <Text
+              size="small"
+              style={{ color: "var(--fgColor-muted)" }}
+            >
+              GitHub Reviews v{chrome.runtime.getManifest().version}
+              {__BUILD_COMMIT__ && (
+                <>
+                  {" · "}
+                  <span style={{ fontFamily: "monospace" }}>{__BUILD_COMMIT__}</span>
+                </>
+              )}
+            </Text>
+            <Button
+              variant="invisible"
+              size="small"
+              leadingVisual={LinkExternalIcon}
+              as="a"
+              href="https://github.com/TheSonOfThomp/github-reviews"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Open this repo on GitHub
+            </Button>
+          </Stack>
         </Stack>
       </BaseStyles>
     </ThemeProvider>
