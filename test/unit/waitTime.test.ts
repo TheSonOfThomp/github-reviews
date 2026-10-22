@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { faker } from "@faker-js/faker";
-import { waitTimeLabel, isPastSla, waitTimeTitle } from "../../src/popover/waitTime";
+import { waitBasis, waitTimeLabel, isPastSla, waitTimeTitle } from "../../src/popover/waitTime";
 import { demoSearchPullsForRepo } from "../../src/background/demoData";
 
 const NOW = new Date("2026-01-15T12:00:00Z").getTime();
@@ -26,11 +26,42 @@ describe("isPastSla", () => {
   });
 });
 
+describe("waitBasis", () => {
+  const pr = (fields: { created_at: string; review_requested_at?: string; ready_for_review_at?: string }) => fields;
+
+  it("starts the clock at the earlier of ready-for-review and the request", () => {
+    // Ready after the request → the request time wins
+    expect(
+      waitBasis(pr({ created_at: hoursAgo(100), review_requested_at: hoursAgo(90), ready_for_review_at: hoursAgo(50) }))
+    ).toEqual({ at: hoursAgo(90), source: "requested" });
+    // Ready before the request → the ready time wins
+    expect(
+      waitBasis(pr({ created_at: hoursAgo(100), review_requested_at: hoursAgo(30), ready_for_review_at: hoursAgo(80) }))
+    ).toEqual({ at: hoursAgo(80), source: "ready" });
+  });
+
+  it("uses the request time alone when the PR is still in draft (no ready time)", () => {
+    expect(waitBasis(pr({ created_at: hoursAgo(100), review_requested_at: hoursAgo(20) }))).toEqual({
+      at: hoursAgo(20),
+      source: "requested",
+    });
+  });
+
+  it("falls back to PR age when no request is known, ignoring ready time", () => {
+    expect(waitBasis(pr({ created_at: hoursAgo(40), ready_for_review_at: hoursAgo(10) }))).toEqual({
+      at: hoursAgo(40),
+      source: "created",
+    });
+  });
+});
+
 describe("waitTimeTitle", () => {
-  it("flags the title only once past the SLA", () => {
-    expect(waitTimeTitle(hoursAgo(1), 72, NOW)).toMatch(/^Open since .+/);
-    expect(waitTimeTitle(hoursAgo(1), 72, NOW)).not.toContain("past SLA");
-    expect(waitTimeTitle(hoursAgo(100), 72, NOW)).toContain("— past SLA");
+  it("labels the basis event and flags only past-SLA waits", () => {
+    expect(waitTimeTitle({ at: hoursAgo(1), source: "requested" }, 72, NOW)).toMatch(/^Review requested .+/);
+    expect(waitTimeTitle({ at: hoursAgo(1), source: "ready" }, 72, NOW)).toMatch(/^Ready for review .+/);
+    expect(waitTimeTitle({ at: hoursAgo(1), source: "created" }, 72, NOW)).toMatch(/^Open since .+/);
+    expect(waitTimeTitle({ at: hoursAgo(100), source: "requested" }, 72, NOW)).toContain("— past SLA");
+    expect(waitTimeTitle({ at: hoursAgo(1), source: "requested" }, 72, NOW)).not.toContain("past SLA");
   });
 });
 
@@ -40,16 +71,25 @@ describe("demo data wait times", () => {
     faker.setDefaultRefDate("2026-01-01T00:00:00Z");
     // Ages count back from the refDate, so judge SLA from it too
     const now = Date.parse("2026-01-01T00:00:00Z");
-    // The union is structurally guaranteed: the first generated PR is always
-    // a review request with the 120h age, and every author PR (generated
-    // next) lands on an under-SLA age — regardless of seed
     const review = demoSearchPullsForRepo("acme/widgets", "review-requested", "demo-user");
     const mine = demoSearchPullsForRepo("acme/widgets", "author", "demo-user");
     const union = [...new Map([...review, ...mine].map((pr) => [pr.id, pr])).values()];
+    const bases = union.map((pr) => waitBasis(pr).at);
     expect(union.length).toBeGreaterThan(0);
-    expect(union.some((pr) => isPastSla(pr.created_at, 72, now))).toBe(true);
-    expect(union.some((pr) => !isPastSla(pr.created_at, 72, now))).toBe(true);
+    expect(bases.some((at) => isPastSla(at, 72, now))).toBe(true);
+    expect(bases.some((at) => !isPastSla(at, 72, now))).toBe(true);
     // And the review view always carries the past-SLA PR
-    expect(review.some((pr) => isPastSla(pr.created_at, 72, now))).toBe(true);
+    expect(review.some((pr) => isPastSla(waitBasis(pr).at, 72, now))).toBe(true);
+  });
+
+  it("gives review-view PRs a request time and leaves author-view PRs without one (#26)", () => {
+    faker.seed(7);
+    faker.setDefaultRefDate("2026-01-01T00:00:00Z");
+    const review = demoSearchPullsForRepo("acme/widgets", "review-requested", "demo-user");
+    const mine = demoSearchPullsForRepo("acme/widgets", "author", "demo-user");
+    expect(review.every((pr) => pr.review_requested_at)).toBe(true);
+    expect(mine.every((pr) => pr.review_requested_at === undefined)).toBe(true);
+    // Draft PRs never left draft; non-draft PRs did
+    expect(review.every((pr) => (pr.draft ? true : pr.ready_for_review_at !== undefined))).toBe(true);
   });
 });

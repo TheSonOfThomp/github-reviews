@@ -17,7 +17,7 @@ import { CheckIcon, DotFillIcon, GearIcon, GitPullRequestIcon, GitPullRequestDra
 import type { CIStatus, PullRequest, RepoError } from "../background/fetchPullRequests";
 import { readCache } from "../background/reviewCache";
 import { DEFAULT_INCLUDE_TEAM_REQUESTS, DEFAULT_SHOW_WAIT_TIME, DEFAULT_WAIT_TIME_SLA_HOURS } from "../settings";
-import { isPastSla, waitTimeLabel, waitTimeTitle } from "./waitTime";
+import { isPastSla, waitBasis, waitTimeLabel, waitTimeTitle } from "./waitTime";
 
 type State =
   | { status: "loading" }
@@ -54,6 +54,26 @@ const arraysEqual = (a: string[], b: string[]) => a.length === b.length && a.eve
 const timeAgo = (fetchedAt: number) => {
   const minutes = Math.max(1, Math.round((Date.now() - fetchedAt) / 60000));
   return minutes < 60 ? `${minutes}m ago` : `${Math.round(minutes / 60)}h ago`;
+};
+
+// Row-end wait time (#26): how long since the earlier of the PR leaving
+// draft and the review being requested (PR age when neither is known)
+const WaitTime = ({ pr, slaHours }: { pr: PullRequest; slaHours: number }) => {
+  const basis = waitBasis(pr);
+  return (
+    <Text
+      as="span"
+      className="wait-time"
+      size="small"
+      title={waitTimeTitle(basis, slaHours)}
+      style={{
+        flexShrink: 0,
+        color: isPastSla(basis.at, slaHours) ? "var(--fgColor-danger)" : "var(--fgColor-muted)",
+      }}
+    >
+      {waitTimeLabel(basis.at)}
+    </Text>
+  );
 };
 
 // Shared CI status icon for both views (#32). Colors come from Primer
@@ -400,21 +420,7 @@ const PullRequestList = ({
               >
                 #{pr.number} {pr.title}
               </Link>
-              {showWaitTime && (
-                <Text
-                  as="span"
-                  size="small"
-                  style={{
-                    flexShrink: 0,
-                    color: isPastSla(pr.created_at, waitTimeSlaHours)
-                      ? "var(--fgColor-danger)"
-                      : "var(--fgColor-muted)",
-                  }}
-                  title={waitTimeTitle(pr.created_at, waitTimeSlaHours)}
-                >
-                  {waitTimeLabel(pr.created_at)}
-                </Text>
-              )}
+              {showWaitTime && <WaitTime pr={pr} slaHours={waitTimeSlaHours} />}
               <CIStatusLink pr={pr} />
             </Stack>
           ))}

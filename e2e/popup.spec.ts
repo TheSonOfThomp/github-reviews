@@ -1,7 +1,7 @@
 import { test, expect } from "./fixtures/extension";
 import type { Page } from "@playwright/test";
 import type { CacheEntry } from "../src/background/reviewCache";
-import { isPastSla, waitTimeLabel } from "../src/popover/waitTime";
+import { isPastSla, waitBasis, waitTimeLabel } from "../src/popover/waitTime";
 import { DEFAULT_WAIT_TIME_SLA_HOURS } from "../src/settings";
 
 const SETTINGS = { githubToken: "stub-token", repos: ["acme/widgets"] };
@@ -71,17 +71,23 @@ test(
 
     for (const pr of entry.prs.slice(0, 3)) {
       await expect(page.getByRole("link", { name: new RegExp(`^#${pr.number} `) })).toBeVisible();
-      // Wait time shows the PR's age, flagged past-SLA in its hover text (#26/#37)
-      const wait = page.locator(`span[title^="Open since"]`, { hasText: waitTimeLabel(pr.created_at) });
+      // Wait time shows the PR's basis — the earlier of ready-for-review and
+      // the review request — with the basis event named in its hover text
+      const basis = waitBasis(pr);
+      const wait = page.locator(".wait-time", { hasText: waitTimeLabel(basis.at) });
       await expect(wait.first()).toBeVisible();
-      if (isPastSla(pr.created_at, DEFAULT_WAIT_TIME_SLA_HOURS)) {
-        await expect(wait.first()).toHaveAttribute("title", /past SLA$/);
-      } else {
-        await expect(wait.first()).not.toHaveAttribute("title", /past SLA/);
-      }
+      const title = await wait.first().getAttribute("title");
+      expect(title).toMatch(
+        basis.source === "requested"
+          ? /^Review requested /
+          : basis.source === "ready"
+            ? /^Ready for review /
+            : /^Open since /
+      );
+      expect(title?.endsWith("past SLA")).toBe(isPastSla(basis.at, DEFAULT_WAIT_TIME_SLA_HOURS));
     }
     // The demo age mix puts at least one PR past the SLA in every batch
-    expect(entry.prs.some((pr) => isPastSla(pr.created_at, DEFAULT_WAIT_TIME_SLA_HOURS))).toBe(true);
+    expect(entry.prs.some((pr) => isPastSla(waitBasis(pr).at, DEFAULT_WAIT_TIME_SLA_HOURS))).toBe(true);
 
     // CI status (#32): one batched GraphQL lookup per refresh, icons only
     // for PRs whose head commit has checks, each linking to the checks page
@@ -109,17 +115,17 @@ test(
     await seedSettings(page, SETTINGS);
     await page.reload();
     await settledEntry(page, "review");
-    await expect(page.locator(`span[title^="Open since"]`).first()).toBeVisible();
+    await expect(page.locator(".wait-time").first()).toBeVisible();
 
     // Flip the setting the way the options page would — the popover applies
     // it live via storage.onChanged, no refetch or reload (#37)
     await seedSettings(page, { showWaitTime: false });
-    await expect(page.locator(`span[title^="Open since"]`)).toHaveCount(0);
+    await expect(page.locator(".wait-time")).toHaveCount(0);
     // The PR rows themselves are untouched
     await expect(page.locator("a[title^='#']").first()).toBeVisible();
 
     await seedSettings(page, { showWaitTime: true });
-    await expect(page.locator(`span[title^="Open since"]`).first()).toBeVisible();
+    await expect(page.locator(".wait-time").first()).toBeVisible();
   }
 );
 

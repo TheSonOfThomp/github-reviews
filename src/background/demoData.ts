@@ -35,6 +35,14 @@ export const DEMO_USERNAME = "demo-user";
 const DEMO_PR_AGE_HOURS = [120, 3, 30, 8, 48, 20];
 let demoPrAgeIndex = 0;
 
+// Deterministic per-PR offsets (hashed from the id, not faker, so the faker
+// sequence is untouched): review is requested 0–47h after creation and the
+// PR leaves draft on a multiple of 8h, so demo data exercises both basis
+// orders — request before ready, and ready before request (#26)
+function hashInt(id: number): number {
+  return (id * 2654435761) >>> 0;
+}
+
 // pravatar.cc serves a stable set of numbered placeholder photos (1..70).
 // Hashed from the login rather than drawn from faker, so the same user always
 // gets the same face and avatars never shift the faker sequence (which made
@@ -154,7 +162,26 @@ export function demoSearchPullsForRepo(
       if (qualifier === "user-review-requested") return direct;
       return direct || pr.requested_teams.some((t) => t.members.includes(login));
     })
-    .map(({ requested_reviewers: _r, requested_teams: _t, ...pr }) => pr);
+    .map((pr) => {
+      const { requested_reviewers: _r, requested_teams: _t, ...out } = pr;
+      const hash = hashInt(pr.id);
+      // Attach the timeline facts the real API resolves via GraphQL: review
+      // was requested of this login (directly, or of their team in the
+      // team-inclusive search), and non-draft PRs left draft at some point.
+      // Author-view PRs get no request time — their reviewers' requests
+      // aren't the author's assignment.
+      if (qualifier !== "author") {
+        out.review_requested_at = new Date(
+          Date.parse(pr.created_at) + (hash % 48) * 3_600_000
+        ).toISOString();
+      }
+      if (!pr.draft) {
+        out.ready_for_review_at = new Date(
+          Date.parse(pr.created_at) + ((hash % 7) * 8) * 3_600_000
+        ).toISOString();
+      }
+      return out;
+    });
 }
 
 export async function demoFetchAuthenticatedUser(): Promise<string> {
