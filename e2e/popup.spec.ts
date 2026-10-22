@@ -101,7 +101,9 @@ test("renders the cached list first, then revalidates in the background", async 
   const cachedTitle = await firstPr.getAttribute("title");
   expect(cachedTitle).toMatch(/^#\d+ /);
 
-  // Slow the fresh fetch down so the cached render is observable
+  // Serve a different PR set next, and slow it down so the cached render is
+  // observable
+  stub.generation++;
   stub.delayMs = 1500;
   await page.reload();
 
@@ -166,6 +168,58 @@ test(
   }
 );
 
+test(
+  "turning off team requests on the options page narrows the Review list to direct requests",
+  // comment-screenshot: publish this test's screenshots to the PR comment
+  { annotation: { type: "comment-screenshot" } },
+  async ({ openPopup, stub, extensionId }) => {
+    const page = await openPopup();
+    await seedSettings(page, SETTINGS);
+    await page.reload();
+    const withTeams = await settledEntry(page, "review");
+    // Default: the Review search includes team requests
+    expect(stub.searchQueries).toContain("repo:acme/widgets is:pr is:open review-requested:demo-user");
+
+    // Flip the switch through the real options UI (same tab, so the final
+    // screenshot is the popup)
+    await page.goto(`chrome-extension://${extensionId}/options.html`);
+    const toggle = page.getByRole("button", { name: "Include PRs requested from my teams" });
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    // Hold the post-change refetch back so the cleared state is observable
+    stub.delayMs = 2000;
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    // The setting change invalidated the cache
+    await expect.poll(async () => await readCache(page), { timeout: 1_500 }).toBe(null);
+    stub.delayMs = 0;
+
+    await page.goto(`chrome-extension://${extensionId}/index.html`);
+    const directOnly = await settledEntry(page, "review");
+
+    // The refetch searched for direct requests only
+    const reviewQueries = stub.searchQueries.filter((q) => !q.includes("author:"));
+    expect(reviewQueries.at(-1)).toBe("repo:acme/widgets is:pr is:open user-review-requested:demo-user");
+
+    // The stub serves the same PR set for every search, so the direct-only
+    // list is a strict subset: the team-only PRs are gone, the rest remain
+    const directIds = new Set(directOnly.prs.map((pr) => pr.id));
+    const teamOnly = withTeams.prs.filter((pr) => !directIds.has(pr.id));
+    expect(teamOnly.length).toBeGreaterThan(0);
+    expect(withTeams.prs.map((pr) => pr.id)).toEqual(expect.arrayContaining([...directIds]));
+    for (const pr of teamOnly) {
+      await expect(page.getByRole("link", { name: new RegExp(`^#${pr.number} `) })).toBeHidden();
+    }
+    for (const pr of directOnly.prs.slice(0, 3)) {
+      await expect(page.getByRole("link", { name: new RegExp(`^#${pr.number} `) })).toBeVisible();
+    }
+    // The repo header's GitHub link applies the same filter (#21)
+    await expect(page.getByRole("link", { name: "acme/widgets", exact: true })).toHaveAttribute(
+      "href",
+      pullsUrl("acme/widgets", "user-review-requested")
+    );
+  }
+);
+
 test("surfaces the SSO authorization error for SSO-protected repos", async ({ openPopup }) => {
   const page = await openPopup();
   await seedSettings(page, { ...SETTINGS, repos: ["acme/sso-org"] });
@@ -176,4 +230,52 @@ test("surfaces the SSO authorization error for SSO-protected repos", async ({ op
     "href",
     "https://github.com/orgs/acme/sso?token=abc123"
   );
+});
+
+const pullsUrl = (repo: string, qualifier: string) =>
+  `https://github.com/${repo}/pulls?q=${encodeURIComponent(`is:pr is:open ${qualifier}:demo-user`)}`;
+
+test(
+  "repo headers link to GitHub's PR list filtered to the active view",
+  // comment-screenshot: publish this test's screenshots to the PR comment
+  { annotation: { type: "comment-screenshot" } },
+  async ({ openPopup }) => {
+    const page = await openPopup();
+    await seedSettings(page, SETTINGS);
+    await page.reload();
+    // Reload once the SW has persisted the username so the header uses it, not @me
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => new Promise((resolve) => chrome.storage.local.get(["githubUsername"], (s) => resolve(s.githubUsername)))
+        )
+      )
+      .toBe("demo-user");
+    await page.reload();
+
+    const review = await settledEntry(page, "review");
+    const header = page.getByRole("link", { name: "acme/widgets", exact: true });
+    await expect(header).toHaveAttribute("href", pullsUrl("acme/widgets", "review-requested"));
+    await expect(header).toHaveAttribute("target", "_blank");
+    if (review.prs.length > 10) {
+      await expect(page.getByRole("link", { name: /more — view all on GitHub/ })).toHaveAttribute(
+        "href",
+        pullsUrl("acme/widgets", "review-requested")
+      );
+    }
+
+    await page.getByRole("button", { name: "My Open PRs" }).click();
+    await settledEntry(page, "mine");
+    await expect(header).toHaveAttribute("href", pullsUrl("acme/widgets", "author"));
+  }
+);
+
+test("errored repos render a plain-text header", async ({ openPopup }) => {
+  const page = await openPopup();
+  await seedSettings(page, { ...SETTINGS, repos: ["acme/sso-org"] });
+  await page.reload();
+
+  await expect(page.getByText("SSO authorization required for acme/sso-org")).toBeVisible();
+  await expect(page.getByText("acme/sso-org", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "acme/sso-org", exact: true })).toHaveCount(0);
 });

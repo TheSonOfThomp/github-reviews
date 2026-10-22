@@ -65,7 +65,7 @@ describe("guards", () => {
   it("returns empty results without fetching when no token is set", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    const result = await fetchOpenPullRequests("", ["acme/widgets"], "octocat");
+    const result = await fetchOpenPullRequests("", ["acme/widgets"], "octocat", true);
 
     expect(result).toEqual({ prs: [], errors: [] });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -76,7 +76,7 @@ describe("guards", () => {
   it("returns empty results without fetching when no repos are configured", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    const result = await fetchOpenPullRequests("token", [], "octocat");
+    const result = await fetchOpenPullRequests("token", [], "octocat", true);
 
     expect(result).toEqual({ prs: [], errors: [] });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -97,7 +97,7 @@ describe("fetchOpenPullRequests", () => {
   it("searches for review requests and tags results with the repo", async () => {
     fetchMock.mockResolvedValueOnce(makeResponse({ body: searchBody([pr(1), pr(3)]) }));
 
-    const { prs, errors } = await fetchOpenPullRequests("token", ["acme/widgets"], "octocat");
+    const { prs, errors } = await fetchOpenPullRequests("token", ["acme/widgets"], "octocat", true);
 
     expect(fetchMock).toHaveBeenCalledWith(
       searchUrl("acme/widgets", "review-requested:octocat"),
@@ -108,10 +108,22 @@ describe("fetchOpenPullRequests", () => {
     expect(prs.every((p) => p.repo === "acme/widgets")).toBe(true);
   });
 
+  it("searches for direct requests only when team requests are excluded", async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse({ body: searchBody([pr(2)]) }));
+
+    const { prs } = await fetchOpenPullRequests("token", ["acme/widgets"], "octocat", false);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      searchUrl("acme/widgets", "user-review-requested:octocat"),
+      expect.anything()
+    );
+    expect(prs.map((p) => p.number)).toEqual([2]);
+  });
+
   it("returns empty results without fetching when no username is resolved", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    const result = await fetchOpenPullRequests("token", ["acme/widgets"], "");
+    const result = await fetchOpenPullRequests("token", ["acme/widgets"], "", true);
 
     expect(result).toEqual({ prs: [], errors: [] });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -122,7 +134,7 @@ describe("fetchOpenPullRequests", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     fetchMock.mockResolvedValueOnce(makeResponse({ body: searchBody([pr(1)], 250) }));
 
-    const { prs } = await fetchOpenPullRequests("token", ["acme/widgets"], "octocat");
+    const { prs } = await fetchOpenPullRequests("token", ["acme/widgets"], "octocat", true);
 
     expect(prs).toHaveLength(1);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("showing 1 of 250"));
@@ -134,7 +146,7 @@ describe("fetchOpenPullRequests", () => {
       makeResponse({ ok: false, status: 500, statusText: "Internal Server Error" })
     );
 
-    const { prs, errors } = await fetchOpenPullRequests("token", ["acme/broken"], "octocat");
+    const { prs, errors } = await fetchOpenPullRequests("token", ["acme/broken"], "octocat", true);
 
     expect(prs).toEqual([]);
     expect(errors).toEqual([
@@ -147,7 +159,7 @@ describe("fetchOpenPullRequests", () => {
       makeResponse({ ok: false, status: 422, statusText: "Unprocessable Entity" })
     );
 
-    const { errors } = await fetchOpenPullRequests("token", ["acme/missing"], "octocat");
+    const { errors } = await fetchOpenPullRequests("token", ["acme/missing"], "octocat", true);
 
     expect(errors).toEqual([
       { repo: "acme/missing", message: "Repo acme/missing not found, or your token lacks access to it" },
@@ -165,7 +177,7 @@ describe("fetchOpenPullRequests", () => {
       })
     );
 
-    const { errors } = await fetchOpenPullRequests("token", ["acme/widgets"], "octocat");
+    const { errors } = await fetchOpenPullRequests("token", ["acme/widgets"], "octocat", true);
 
     expect(errors).toEqual([
       { repo: "acme/widgets", message: "GitHub search rate limit hit — retry in 42s" },
@@ -183,7 +195,7 @@ describe("fetchOpenPullRequests", () => {
       })
     );
 
-    const { prs, errors } = await fetchOpenPullRequests("token", ["acme/private"], "octocat");
+    const { prs, errors } = await fetchOpenPullRequests("token", ["acme/private"], "octocat", true);
 
     expect(prs).toEqual([]);
     expect(errors).toEqual([
@@ -203,7 +215,7 @@ describe("fetchOpenPullRequests", () => {
       })
     );
 
-    const { errors } = await fetchOpenPullRequests("token", ["acme/private"], "octocat");
+    const { errors } = await fetchOpenPullRequests("token", ["acme/private"], "octocat", true);
 
     expect(errors).toEqual([
       {
@@ -229,7 +241,8 @@ describe("fetchOpenPullRequests", () => {
     const { prs, errors } = await fetchOpenPullRequests(
       "token",
       ["acme/ok", "acme/failing"],
-      "octocat"
+      "octocat",
+      true
     );
 
     expect(prs.map((p) => p.number)).toEqual([1]);
@@ -313,7 +326,7 @@ describe("CI status enrichment in fetchOpenPullRequests", () => {
         : makeResponse({ body: graphqlBody({ n1: "SUCCESS", n2: "ERROR" }) })
     );
 
-    const { prs, errors } = await fetchOpenPullRequests("token", ["acme/widgets"], "octocat");
+    const { prs, errors } = await fetchOpenPullRequests("token", ["acme/widgets"], "octocat", true);
 
     expect(errors).toEqual([]);
     expect(prs.map((p) => p.ci_status)).toEqual(["success", "failure"]);
@@ -332,7 +345,7 @@ describe("CI status enrichment in fetchOpenPullRequests", () => {
           })
     );
 
-    const { prs, errors } = await fetchOpenPullRequests("token", ["acme/widgets"], "octocat");
+    const { prs, errors } = await fetchOpenPullRequests("token", ["acme/widgets"], "octocat", true);
 
     expect(errors).toEqual([]);
     expect(prs).toHaveLength(2);
@@ -352,7 +365,7 @@ describe("CI status enrichment in fetchOpenPullRequests", () => {
         : makeResponse({ body: { errors: [{ message: "Field 'statusCheckRollup' requires scope" }] } })
     );
 
-    const { prs, errors } = await fetchOpenPullRequests("token", ["acme/widgets"], "octocat");
+    const { prs, errors } = await fetchOpenPullRequests("token", ["acme/widgets"], "octocat", true);
 
     expect(errors).toEqual([]);
     expect(prs).toHaveLength(2);
@@ -369,7 +382,7 @@ describe("CI status enrichment in fetchOpenPullRequests", () => {
       throw new Error("network down");
     });
 
-    const { prs, errors } = await fetchOpenPullRequests("token", ["acme/widgets"], "octocat");
+    const { prs, errors } = await fetchOpenPullRequests("token", ["acme/widgets"], "octocat", true);
 
     expect(errors).toEqual([]);
     expect(prs).toHaveLength(2);
