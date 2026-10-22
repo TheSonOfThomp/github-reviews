@@ -82,6 +82,21 @@ test(
     }
     // The demo age mix puts at least one PR past the SLA in every batch
     expect(entry.prs.some((pr) => isPastSla(pr.created_at, DEFAULT_WAIT_TIME_SLA_HOURS))).toBe(true);
+
+    // CI status (#32): one batched GraphQL lookup per refresh, icons only
+    // for PRs whose head commit has checks, each linking to the checks page
+    expect(stub.graphqlIdBatches.length).toBeGreaterThan(0);
+    expect(stub.graphqlIdBatches.every((ids) => ids.length <= 100)).toBe(true);
+    const visiblePrs = entry.prs.slice(0, 10);
+    const withCI = visiblePrs.filter((pr) => pr.ci_status);
+    expect(withCI.length).toBeGreaterThan(0);
+    await expect(page.getByRole("link", { name: /^CI: / })).toHaveCount(withCI.length);
+    for (const pr of withCI) {
+      await expect(
+        page.getByRole("link", { name: /^CI: / }).filter({ has: page.locator("svg") })
+      ).toHaveCount(withCI.length); // sanity: every CI link carries an icon
+      await expect(page.locator(`a[href="${pr.html_url}/checks"]`)).toBeVisible();
+    }
   }
 );
 
@@ -180,6 +195,11 @@ test(
     // And it is a different set from the review view
     const reviewNumbers = new Set(review.prs.map((pr) => pr.number));
     expect(mine.prs.some((pr) => !reviewNumbers.has(pr.number))).toBe(true);
+
+    // CI status icons appear in the My Open PRs view too (#32)
+    const mineWithCI = mine.prs.slice(0, 10).filter((pr) => pr.ci_status);
+    expect(mineWithCI.length).toBeGreaterThan(0);
+    await expect(page.getByRole("link", { name: /^CI: / })).toHaveCount(mineWithCI.length);
   }
 );
 

@@ -15,7 +15,7 @@ import {
   Link,
   ToggleSwitch,
 } from "@primer/react";
-import { XIcon, EyeIcon, EyeClosedIcon, GrabberIcon, CheckCircleFillIcon } from "@primer/octicons-react";
+import { XIcon, EyeIcon, EyeClosedIcon, GrabberIcon, CheckCircleFillIcon, LinkExternalIcon } from "@primer/octicons-react";
 import { DEFAULT_INCLUDE_TEAM_REQUESTS, DEFAULT_SHOW_WAIT_TIME, DEFAULT_WAIT_TIME_SLA_HOURS } from "../settings";
 
 interface Settings {
@@ -217,7 +217,7 @@ export const OptionsPage = () => {
               lineHeight: 1.6,
             }}>
               <strong>Classic PAT</strong> — use the <code>repo</code> scope. Required for SSO-protected orgs (authorize per org via <em>Configure SSO</em> on the token page).<br />
-              <strong>Fine-grained PAT</strong> — set <em>Resource owner</em> to the org, grant <em>Pull requests: Read</em>. Not supported by all orgs.
+              <strong>Fine-grained PAT</strong> — set <em>Resource owner</em> to the org, grant <em>Pull requests: Read</em>, plus <em>Commit statuses: Read</em> and <em>Checks: Read</em> for the CI status icons. Not supported by all orgs.
             </aside>
 
           <FormControl>
@@ -258,6 +258,16 @@ export const OptionsPage = () => {
                   >
                     {repo}
                   </Text>
+                  <IconButton
+                    icon={LinkExternalIcon}
+                    aria-label={`Open ${repo} on GitHub`}
+                    size="small"
+                    variant="invisible"
+                    as="a"
+                    href={`https://github.com/${repo}/pulls`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  />
                   <IconButton
                     icon={XIcon}
                     aria-label={`Remove ${repo}`}
@@ -343,18 +353,31 @@ export const OptionsPage = () => {
             </Button>
           </Stack>
 
-          <Text
-            size="small"
-            style={{ color: "var(--fgColor-muted)", marginTop: 8 }}
-          >
-            GitHub Reviews v{chrome.runtime.getManifest().version}
-            {__BUILD_COMMIT__ && (
-              <>
-                {" · "}
-                <span style={{ fontFamily: "monospace" }}>{__BUILD_COMMIT__}</span>
-              </>
-            )}
-          </Text>
+          <Stack direction="horizontal" gap="condensed" align="center" style={{ marginTop: 8 }}>
+            <Text
+              size="small"
+              style={{ color: "var(--fgColor-muted)" }}
+            >
+              GitHub Reviews v{chrome.runtime.getManifest().version}
+              {__BUILD_COMMIT__ && (
+                <>
+                  {" · "}
+                  <span style={{ fontFamily: "monospace" }}>{__BUILD_COMMIT__}</span>
+                </>
+              )}
+            </Text>
+            <Button
+              variant="invisible"
+              size="small"
+              leadingVisual={LinkExternalIcon}
+              as="a"
+              href="https://github.com/TheSonOfThomp/github-reviews"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Open this repo on GitHub
+            </Button>
+          </Stack>
         </Stack>
       </BaseStyles>
     </ThemeProvider>
