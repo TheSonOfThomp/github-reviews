@@ -1,6 +1,8 @@
 import { test, expect } from "./fixtures/extension";
 import type { Page } from "@playwright/test";
 import type { CacheEntry } from "../src/background/reviewCache";
+import { isPastSla, waitTimeLabel } from "../src/popover/waitTime";
+import { DEFAULT_WAIT_TIME_SLA_HOURS } from "../src/settings";
 
 const SETTINGS = { githubToken: "stub-token", repos: ["acme/widgets"] };
 
@@ -49,24 +51,62 @@ test("popup shows the no-token guard when no settings are configured", async ({ 
   await expect(page.locator("a[title^='#']")).toHaveCount(0);
 });
 
-test("renders demo-data PRs and writes them to the cache", async ({ openPopup, stub }) => {
-  const page = await openPopup();
-  await seedSettings(page, SETTINGS);
-  await page.reload();
+test(
+  "renders demo-data PRs and writes them to the cache",
+  // comment-screenshot: publish this test's screenshots to the PR comment
+  { annotation: { type: "comment-screenshot" } },
+  async ({ openPopup, stub }) => {
+    const page = await openPopup();
+    await seedSettings(page, SETTINGS);
+    await page.reload();
 
-  await expect(page.getByText("acme/widgets")).toBeVisible();
-  const entry = await settledEntry(page, "review");
+    await expect(page.getByText("acme/widgets")).toBeVisible();
+    const entry = await settledEntry(page, "review");
 
-  expect(entry.errors).toEqual([]);
-  expect(entry.repos).toEqual(["acme/widgets"]);
-  // The review view searched server-side for the demo user's review requests
-  expect(entry.prs.length).toBeGreaterThan(0);
-  expect(stub.searchQueries).toContain("repo:acme/widgets is:pr is:open review-requested:demo-user");
+    expect(entry.errors).toEqual([]);
+    expect(entry.repos).toEqual(["acme/widgets"]);
+    // The review view searched server-side for the demo user's review requests
+    expect(entry.prs.length).toBeGreaterThan(0);
+    expect(stub.searchQueries).toContain("repo:acme/widgets is:pr is:open review-requested:demo-user");
 
-  for (const pr of entry.prs.slice(0, 3)) {
-    await expect(page.getByRole("link", { name: new RegExp(`^#${pr.number} `) })).toBeVisible();
+    for (const pr of entry.prs.slice(0, 3)) {
+      await expect(page.getByRole("link", { name: new RegExp(`^#${pr.number} `) })).toBeVisible();
+      // Wait time shows the PR's age, flagged past-SLA in its hover text (#26/#37)
+      const wait = page.locator(`span[title^="Open since"]`, { hasText: waitTimeLabel(pr.created_at) });
+      await expect(wait.first()).toBeVisible();
+      if (isPastSla(pr.created_at, DEFAULT_WAIT_TIME_SLA_HOURS)) {
+        await expect(wait.first()).toHaveAttribute("title", /past SLA$/);
+      } else {
+        await expect(wait.first()).not.toHaveAttribute("title", /past SLA/);
+      }
+    }
+    // The demo age mix puts at least one PR past the SLA in every batch
+    expect(entry.prs.some((pr) => isPastSla(pr.created_at, DEFAULT_WAIT_TIME_SLA_HOURS))).toBe(true);
   }
-});
+);
+
+test(
+  "hides wait times when the setting turns off, without a reload",
+  // comment-screenshot: publish this test's screenshots to the PR comment
+  { annotation: { type: "comment-screenshot" } },
+  async ({ openPopup }) => {
+    const page = await openPopup();
+    await seedSettings(page, SETTINGS);
+    await page.reload();
+    await settledEntry(page, "review");
+    await expect(page.locator(`span[title^="Open since"]`).first()).toBeVisible();
+
+    // Flip the setting the way the options page would — the popover applies
+    // it live via storage.onChanged, no refetch or reload (#37)
+    await seedSettings(page, { showWaitTime: false });
+    await expect(page.locator(`span[title^="Open since"]`)).toHaveCount(0);
+    // The PR rows themselves are untouched
+    await expect(page.locator("a[title^='#']").first()).toBeVisible();
+
+    await seedSettings(page, { showWaitTime: true });
+    await expect(page.locator(`span[title^="Open since"]`).first()).toBeVisible();
+  }
+);
 
 test("renders the cached list first, then revalidates in the background", async ({
   openPopup,
