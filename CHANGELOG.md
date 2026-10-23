@@ -1,5 +1,16 @@
 # chrome-extension
 
+## 0.4.0
+
+### Minor Changes
+
+- 00026f7: Show how long each PR has been awaiting review: a compact wait time at the end of each popover row that starts at the earlier of the PR leaving draft and the review being requested (directly, or of your team) — resolved in the same batched GraphQL lookup the CI icons use — with PR age as the fallback. Exact timestamp on hover, a Settings toggle to hide it, and a review SLA (hours) that turns overdue wait times red. Resolves #26, resolves #37.
+
+### Patch Changes
+
+- 63a05a8: Show CI status on PRs in both views (#32). Each PR row now shows a status icon (passing/failing/pending) linked to the PR's checks page, populated by a single batched GraphQL `nodes(ids:)` query per refresh (chunked at 100 IDs) using the head commit's `statusCheckRollup.state`. A failed CI lookup never fails the refresh — PRs render without icons instead.
+- d5e3303: Add "Open on GitHub" buttons to the settings page: one per repo row (opens that repo's pulls page) and one in the footer (opens the extension's repository)
+
 ## 0.3.1
 
 ### Patch Changes
