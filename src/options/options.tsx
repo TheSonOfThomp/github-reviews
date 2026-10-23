@@ -16,18 +16,22 @@ import {
   ToggleSwitch,
 } from "@primer/react";
 import { XIcon, EyeIcon, EyeClosedIcon, GrabberIcon, CheckCircleFillIcon, LinkExternalIcon } from "@primer/octicons-react";
-import { DEFAULT_INCLUDE_TEAM_REQUESTS } from "../settings";
+import { DEFAULT_INCLUDE_TEAM_REQUESTS, DEFAULT_SHOW_WAIT_TIME, DEFAULT_WAIT_TIME_SLA_HOURS } from "../settings";
 
 interface Settings {
   githubToken: string;
   repos: string[];
   includeTeamRequests: boolean;
+  showWaitTime: boolean;
+  waitTimeSlaHours: number;
 }
 
 const defaultSettings: Settings = {
   githubToken: "",
   repos: [],
   includeTeamRequests: DEFAULT_INCLUDE_TEAM_REQUESTS,
+  showWaitTime: DEFAULT_SHOW_WAIT_TIME,
+  waitTimeSlaHours: DEFAULT_WAIT_TIME_SLA_HOURS,
 };
 
 export const OptionsPage = () => {
@@ -86,6 +90,20 @@ export const OptionsPage = () => {
 
   const handleToggleTeamRequests = () => {
     const updated = { ...settings, includeTeamRequests: !settings.includeTeamRequests };
+    setSettings(updated);
+    saveSettings(updated);
+  };
+
+  const handleToggleWaitTime = () => {
+    const updated = { ...settings, showWaitTime: !settings.showWaitTime };
+    setSettings(updated);
+    saveSettings(updated);
+  };
+
+  const handleSlaHoursChange = (value: string) => {
+    const hours = Number(value);
+    if (!Number.isFinite(hours) || hours <= 0) return;
+    const updated = { ...settings, waitTimeSlaHours: hours };
     setSettings(updated);
     saveSettings(updated);
   };
@@ -296,6 +314,38 @@ export const OptionsPage = () => {
               size="small"
             />
           </Stack>
+
+          <Stack direction="horizontal" gap="normal" align="start" justify="space-between">
+            <Stack direction="vertical" gap="none">
+              <Text id="wait-time-label" weight="semibold" size="medium">
+                Show how long PRs have been open
+              </Text>
+              <Text id="wait-time-caption" size="small" style={{ color: "var(--fgColor-muted)" }}>
+                A wait time at the end of each PR row; turns red once past the SLA below.
+              </Text>
+            </Stack>
+            <ToggleSwitch
+              checked={settings.showWaitTime}
+              onClick={handleToggleWaitTime}
+              aria-labelledby="wait-time-label"
+              aria-describedby="wait-time-caption"
+              size="small"
+            />
+          </Stack>
+
+          <FormControl>
+            <FormControl.Label>Review SLA (hours)</FormControl.Label>
+            <TextInput
+              type="number"
+              min={1}
+              value={settings.waitTimeSlaHours}
+              onChange={(e) => handleSlaHoursChange(e.target.value)}
+              block
+            />
+            <FormControl.Caption>
+              Wait times turn red once a PR has been open longer than this. Default: 72 (3 days).
+            </FormControl.Caption>
+          </FormControl>
 
           <Stack direction="horizontal" gap="normal" align="center">
             <Button variant="primary" onClick={handleSave}>

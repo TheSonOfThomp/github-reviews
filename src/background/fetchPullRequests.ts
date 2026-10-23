@@ -19,6 +19,10 @@ export interface PullRequest {
   updated_at: string;
   draft: boolean;
   repo: string;
+  /** Latest review_requested event matching the user (or their team); undefined = none matched. */
+  review_requested_at?: string;
+  /** When the PR last left draft; undefined while it is (or was never) out of draft. */
+  ready_for_review_at?: string;
   /** Combined check/status state of the head commit; undefined = no checks (or lookup failed). */
   ci_status?: CIStatus;
 }
@@ -67,13 +71,23 @@ const GRAPHQL_URL = "https://api.github.com/graphql";
 // nodes(ids:) accepts at most 100 IDs per query
 const GRAPHQL_IDS_PER_QUERY = 100;
 
-const CI_STATUS_QUERY = `
+const PR_ENRICHMENT_QUERY = `
   query ($ids: [ID!]!) {
     nodes(ids: $ids) {
       ... on PullRequest {
         id
+        isDraft
         commits(last: 1) {
           nodes { commit { statusCheckRollup { state } } }
+        }
+        timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT, READY_FOR_REVIEW_EVENT], last: 100) {
+          nodes {
+            ... on ReviewRequestedEvent {
+              createdAt
+              requestedReviewer { ... on User { login } ... on Team { slug } }
+            }
+            ... on ReadyForReviewEvent { createdAt }
+          }
         }
       }
     }
@@ -98,30 +112,78 @@ export const rollupStateToCIStatus = (state: StatusCheckRollupState | null | und
   }
 };
 
-interface GraphQLNode {
-  id?: string;
-  commits?: { nodes?: Array<{ commit?: { statusCheckRollup?: { state?: StatusCheckRollupState } | null } }> };
+interface RequestedReviewer {
+  login?: string;
+  slug?: string;
 }
 
+interface TimelineEvent {
+  createdAt?: string;
+  requestedReviewer?: RequestedReviewer | null;
+}
+
+interface GraphQLNode {
+  id?: string;
+  isDraft?: boolean;
+  commits?: { nodes?: Array<{ commit?: { statusCheckRollup?: { state?: StatusCheckRollupState } | null } }> };
+  timelineItems?: { nodes?: TimelineEvent[] };
+}
+
+export interface PrEnrichment {
+  ci_status?: CIStatus;
+  review_requested_at?: string;
+  ready_for_review_at?: string;
+}
+
+/** Latest matching review_requested event, and the latest ready-for-review time (#26). */
+export const timelineEnrichments = (
+  node: GraphQLNode,
+  username: string,
+  matchTeams: boolean
+): Pick<PrEnrichment, "review_requested_at" | "ready_for_review_at"> => {
+  let requestedAt: string | undefined;
+  let readyAt: string | undefined;
+  for (const event of node.timelineItems?.nodes ?? []) {
+    if (!event.createdAt) continue;
+    if (event.requestedReviewer) {
+      // Team membership can't be verified here — but the search already
+      // filtered to PRs requested of the user or their team, so a team
+      // event on a matched PR counts when team requests are included
+      const matches =
+        event.requestedReviewer.login === username ||
+        (matchTeams && event.requestedReviewer.slug !== undefined);
+      if (matches && (!requestedAt || event.createdAt > requestedAt)) requestedAt = event.createdAt;
+    } else {
+      if (!readyAt || event.createdAt > readyAt) readyAt = event.createdAt;
+    }
+  }
+  // A PR back in draft has no meaningful out-of-draft time
+  if (node.isDraft) readyAt = undefined;
+  return { review_requested_at: requestedAt, ready_for_review_at: readyAt };
+};
+
 /*
- * Batched CI status lookup (#32). Search items are issue-shaped and carry
- * no check data, but they do carry `node_id`, so one GraphQL nodes(ids:)
- * query per 100 PRs resolves every head commit's statusCheckRollup — far
- * cheaper than 2–3 REST calls per PR, and it uses the GraphQL rate-limit
- * budget (separate from search's 30 req/min). Returns node_id → CIStatus.
+ * Batched PR enrichment (#32/#26). Search items are issue-shaped and carry
+ * no check or timeline data, but they do carry `node_id`, so one GraphQL
+ * nodes(ids:) query per 100 PRs resolves every head commit's CI status and
+ * the review-request/ready-for-review timestamps — far cheaper than 2–3
+ * REST calls per PR, and it uses the GraphQL rate-limit budget (separate
+ * from search's 30 req/min). Returns node_id → enrichment.
  */
-export async function fetchCIStatuses(
+export async function fetchPrEnrichments(
   githubToken: string,
-  prs: PullRequest[]
-): Promise<Map<string, CIStatus>> {
-  const statuses = new Map<string, CIStatus>();
+  prs: PullRequest[],
+  username: string,
+  matchTeams: boolean
+): Promise<Map<string, PrEnrichment>> {
+  const enrichments = new Map<string, PrEnrichment>();
   const ids = prs.map((pr) => pr.node_id).filter((id): id is string => Boolean(id));
   for (let i = 0; i < ids.length; i += GRAPHQL_IDS_PER_QUERY) {
     const chunk = ids.slice(i, i + GRAPHQL_IDS_PER_QUERY);
     const response = await fetch(GRAPHQL_URL, {
       method: "POST",
       headers: { ...githubHeaders(githubToken), "Content-Type": "application/json" },
-      body: JSON.stringify({ query: CI_STATUS_QUERY, variables: { ids: chunk } }),
+      body: JSON.stringify({ query: PR_ENRICHMENT_QUERY, variables: { ids: chunk } }),
     });
 
     if (!response.ok) {
@@ -143,12 +205,14 @@ export async function fetchCIStatuses(
     }
 
     for (const node of data.data.nodes) {
-      const state = node?.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state;
-      const status = rollupStateToCIStatus(state);
-      if (node?.id && status) statuses.set(node.id, status);
+      if (!node?.id) continue;
+      const enrichment: PrEnrichment = { ...timelineEnrichments(node, username, matchTeams) };
+      const status = rollupStateToCIStatus(node?.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state);
+      if (status) enrichment.ci_status = status;
+      enrichments.set(node.id, enrichment);
     }
   }
-  return statuses;
+  return enrichments;
 }
 
 function errorForResponse(repo: string, response: Response): RepoError {
@@ -240,17 +304,24 @@ async function fetchPRsFromRepos(
     }
   });
 
-  // Attach CI statuses from the batched GraphQL lookup. A failed lookup
-  // (network, rate limit, token missing the Checks/Commit statuses scope)
-  // must not fail the refresh — render the PRs without icons instead (#32).
+  // Attach CI statuses and review-request timestamps from the batched GraphQL
+  // lookup. A failed lookup (network, rate limit, token missing scopes) must
+  // not fail the refresh — render the PRs without them instead (#32/#26).
+  // Team timeline events only count in the team-inclusive review search; the
+  // author view's own PRs would otherwise inherit their reviewers' requests.
   try {
-    const statuses = await fetchCIStatuses(githubToken, prs);
+    const enrichments = await fetchPrEnrichments(
+      githubToken,
+      prs,
+      username,
+      qualifierKey === "review-requested"
+    );
     for (const pr of prs) {
-      const status = pr.node_id ? statuses.get(pr.node_id) : undefined;
-      if (status) pr.ci_status = status;
+      const enrichment = pr.node_id ? enrichments.get(pr.node_id) : undefined;
+      if (enrichment) Object.assign(pr, enrichment);
     }
   } catch (e) {
-    console.warn("[BACKGROUND] CI status lookup failed; rendering PRs without CI icons:", e);
+    console.warn("[BACKGROUND] PR enrichment lookup failed; rendering PRs without CI icons or request times:", e);
   }
 
   console.log(

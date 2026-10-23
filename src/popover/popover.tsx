@@ -16,7 +16,8 @@ import {
 import { CheckIcon, DotFillIcon, GearIcon, GitPullRequestIcon, GitPullRequestDraftIcon, LinkExternalIcon, SyncIcon, XIcon } from "@primer/octicons-react";
 import type { CIStatus, PullRequest, RepoError } from "../background/fetchPullRequests";
 import { readCache } from "../background/reviewCache";
-import { DEFAULT_INCLUDE_TEAM_REQUESTS } from "../settings";
+import { DEFAULT_INCLUDE_TEAM_REQUESTS, DEFAULT_SHOW_WAIT_TIME, DEFAULT_WAIT_TIME_SLA_HOURS } from "../settings";
+import { isPastSla, waitBasis, waitTimeLabel, waitTimeTitle } from "./waitTime";
 
 type State =
   | { status: "loading" }
@@ -55,6 +56,26 @@ const timeAgo = (fetchedAt: number) => {
   return minutes < 60 ? `${minutes}m ago` : `${Math.round(minutes / 60)}h ago`;
 };
 
+// Row-end wait time (#26): how long since the earlier of the PR leaving
+// draft and the review being requested (PR age when neither is known)
+const WaitTime = ({ pr, slaHours }: { pr: PullRequest; slaHours: number }) => {
+  const basis = waitBasis(pr);
+  return (
+    <Text
+      as="span"
+      className="wait-time"
+      size="small"
+      title={waitTimeTitle(basis, slaHours)}
+      style={{
+        flexShrink: 0,
+        color: isPastSla(basis.at, slaHours) ? "var(--fgColor-danger)" : "var(--fgColor-muted)",
+      }}
+    >
+      {waitTimeLabel(basis.at)}
+    </Text>
+  );
+};
+
 // Shared CI status icon for both views (#32). Colors come from Primer
 // functional tokens, so light/dark themes both work.
 const CI_STATUS_META: Record<CIStatus, { Icon: typeof CheckIcon; color: string; label: string }> = {
@@ -87,6 +108,20 @@ export const PopoverContent = () => {
   const [viewMode, setViewMode] = useState<ViewMode | null>(null);
   const [username, setUsername] = useState<string | null>(null);
   const [includeTeamRequests, setIncludeTeamRequests] = useState(DEFAULT_INCLUDE_TEAM_REQUESTS);
+  const [showWaitTime, setShowWaitTime] = useState(DEFAULT_SHOW_WAIT_TIME);
+  const [waitTimeSlaHours, setWaitTimeSlaHours] = useState(DEFAULT_WAIT_TIME_SLA_HOURS);
+
+  useEffect(() => {
+    // Wait-time settings only affect rendering — apply them live without a
+    // refetch or reload (#37), unlike token/repos which invalidate the cache
+    const listener = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
+      if (area !== "sync") return;
+      if (changes.showWaitTime) setShowWaitTime(changes.showWaitTime.newValue ?? DEFAULT_SHOW_WAIT_TIME);
+      if (changes.waitTimeSlaHours) setWaitTimeSlaHours(changes.waitTimeSlaHours.newValue ?? DEFAULT_WAIT_TIME_SLA_HOURS);
+    };
+    chrome.storage.onChanged.addListener(listener);
+    return () => chrome.storage.onChanged.removeListener(listener);
+  }, []);
 
   useEffect(() => {
     chrome.storage.local.get({ viewMode: "review", githubUsername: null }, (stored) => {
@@ -103,9 +138,11 @@ export const PopoverContent = () => {
   useEffect(() => {
     if (viewMode === null) return;
     setState({ status: "loading" });
-    const syncDefaults = { githubToken: "", repos: [], includeTeamRequests: DEFAULT_INCLUDE_TEAM_REQUESTS };
+    const syncDefaults = { githubToken: "", repos: [], includeTeamRequests: DEFAULT_INCLUDE_TEAM_REQUESTS, showWaitTime: DEFAULT_SHOW_WAIT_TIME, waitTimeSlaHours: DEFAULT_WAIT_TIME_SLA_HOURS };
     chrome.storage.sync.get(syncDefaults, (stored) => {
       setIncludeTeamRequests(stored.includeTeamRequests as boolean);
+      setShowWaitTime(stored.showWaitTime as boolean);
+      setWaitTimeSlaHours(stored.waitTimeSlaHours as number);
       // DEMO mode bypasses the settings guards so demo data renders unconfigured.
       // NOTE: keep negated flag checks as `!== "true"` — a bare
       // `!process.env.DEMO_MODE` folds to constant false in production builds
@@ -252,7 +289,7 @@ export const PopoverContent = () => {
           )}
 
           {state.status === "done" && (
-            <PullRequestList prs={state.prs} repos={state.repos} errors={state.errors} viewMode={viewMode!} username={username} includeTeamRequests={includeTeamRequests} />
+            <PullRequestList prs={state.prs} repos={state.repos} errors={state.errors} viewMode={viewMode!} username={username} includeTeamRequests={includeTeamRequests} showWaitTime={showWaitTime} waitTimeSlaHours={waitTimeSlaHours} />
           )}
         </Stack>
 
@@ -286,6 +323,8 @@ const PullRequestList = ({
   viewMode,
   username,
   includeTeamRequests,
+  showWaitTime,
+  waitTimeSlaHours,
 }: {
   prs: PullRequest[];
   repos: string[];
@@ -293,6 +332,8 @@ const PullRequestList = ({
   viewMode: ViewMode;
   username: string | null;
   includeTeamRequests: boolean;
+  showWaitTime: boolean;
+  waitTimeSlaHours: number;
 }) => {
   const byRepo = prs.reduce<Record<string, PullRequest[]>>((acc, pr) => {
     (acc[pr.repo] ??= []).push(pr);
@@ -379,6 +420,7 @@ const PullRequestList = ({
               >
                 #{pr.number} {pr.title}
               </Link>
+              {showWaitTime && <WaitTime pr={pr} slaHours={waitTimeSlaHours} />}
               <CIStatusLink pr={pr} />
             </Stack>
           ))}

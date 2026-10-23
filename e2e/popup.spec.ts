@@ -1,6 +1,8 @@
 import { test, expect } from "./fixtures/extension";
 import type { Page } from "@playwright/test";
 import type { CacheEntry } from "../src/background/reviewCache";
+import { isPastSla, waitBasis, waitTimeLabel } from "../src/popover/waitTime";
+import { DEFAULT_WAIT_TIME_SLA_HOURS } from "../src/settings";
 
 const SETTINGS = { githubToken: "stub-token", repos: ["acme/widgets"] };
 
@@ -69,7 +71,23 @@ test(
 
     for (const pr of entry.prs.slice(0, 3)) {
       await expect(page.getByRole("link", { name: new RegExp(`^#${pr.number} `) })).toBeVisible();
+      // Wait time shows the PR's basis — the earlier of ready-for-review and
+      // the review request — with the basis event named in its hover text
+      const basis = waitBasis(pr);
+      const wait = page.locator(".wait-time", { hasText: waitTimeLabel(basis.at) });
+      await expect(wait.first()).toBeVisible();
+      const title = await wait.first().getAttribute("title");
+      expect(title).toMatch(
+        basis.source === "requested"
+          ? /^Review requested /
+          : basis.source === "ready"
+            ? /^Ready for review /
+            : /^Open since /
+      );
+      expect(title?.endsWith("past SLA")).toBe(isPastSla(basis.at, DEFAULT_WAIT_TIME_SLA_HOURS));
     }
+    // The demo age mix puts at least one PR past the SLA in every batch
+    expect(entry.prs.some((pr) => isPastSla(waitBasis(pr).at, DEFAULT_WAIT_TIME_SLA_HOURS))).toBe(true);
 
     // CI status (#32): one batched GraphQL lookup per refresh, icons only
     // for PRs whose head commit has checks, each linking to the checks page
@@ -85,6 +103,29 @@ test(
       ).toHaveCount(withCI.length); // sanity: every CI link carries an icon
       await expect(page.locator(`a[href="${pr.html_url}/checks"]`)).toBeVisible();
     }
+  }
+);
+
+test(
+  "hides wait times when the setting turns off, without a reload",
+  // comment-screenshot: publish this test's screenshots to the PR comment
+  { annotation: { type: "comment-screenshot" } },
+  async ({ openPopup }) => {
+    const page = await openPopup();
+    await seedSettings(page, SETTINGS);
+    await page.reload();
+    await settledEntry(page, "review");
+    await expect(page.locator(".wait-time").first()).toBeVisible();
+
+    // Flip the setting the way the options page would — the popover applies
+    // it live via storage.onChanged, no refetch or reload (#37)
+    await seedSettings(page, { showWaitTime: false });
+    await expect(page.locator(".wait-time")).toHaveCount(0);
+    // The PR rows themselves are untouched
+    await expect(page.locator("a[title^='#']").first()).toBeVisible();
+
+    await seedSettings(page, { showWaitTime: true });
+    await expect(page.locator(".wait-time").first()).toBeVisible();
   }
 );
 

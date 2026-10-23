@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   fetchAuthenticatedUser,
-  fetchCIStatuses,
+  fetchPrEnrichments,
   fetchOpenPullRequests,
   fetchMyOpenPullRequests,
   rollupStateToCIStatus,
   searchUrl,
+  timelineEnrichments,
   type PullRequest,
 } from "../../src/background/fetchPullRequests";
 import { makeResponse } from "../mocks/fetch";
@@ -253,12 +254,13 @@ describe("fetchOpenPullRequests", () => {
   });
 });
 
-/** GraphQL response body mapping node IDs to statusCheckRollup states. */
-const graphqlBody = (states: Record<string, string | null>) => ({
+/** GraphQL response body mapping node IDs to statusCheckRollup states (+ optional timeline events). */
+const graphqlBody = (states: Record<string, string | null>, timelines: Record<string, object[]> = {}) => ({
   data: {
     nodes: Object.entries(states).map(([id, state]) => ({
       id,
       commits: { nodes: [{ commit: { statusCheckRollup: { state } } }] },
+      ...(timelines[id] ? { timelineItems: { nodes: timelines[id] } } : {}),
     })),
   },
 });
@@ -275,32 +277,96 @@ describe("rollupStateToCIStatus", () => {
   });
 });
 
-describe("fetchCIStatuses", () => {
+describe("timelineEnrichments", () => {
+  const at = "2026-01-02T00:00:00Z";
+
+  it("matches the latest event where the user was directly requested", () => {
+    const node = {
+      timelineItems: {
+        nodes: [
+          { createdAt: "2026-01-01T00:00:00Z", requestedReviewer: { login: "octocat" } },
+          { createdAt: "2026-01-03T00:00:00Z", requestedReviewer: { login: "octocat" } },
+          { createdAt: "2026-01-04T00:00:00Z", requestedReviewer: { login: "someone-else" } },
+        ],
+      },
+    };
+    expect(timelineEnrichments(node, "octocat", true)).toEqual({
+      review_requested_at: "2026-01-03T00:00:00Z",
+      ready_for_review_at: undefined,
+    });
+  });
+
+  it("counts team events only when team requests are included", () => {
+    const node = {
+      timelineItems: { nodes: [{ createdAt: at, requestedReviewer: { slug: "core" } }] },
+    };
+    expect(timelineEnrichments(node, "octocat", true).review_requested_at).toBe(at);
+    expect(timelineEnrichments(node, "octocat", false).review_requested_at).toBeUndefined();
+  });
+
+  it("takes the latest ready-for-review time, dropped while the PR is back in draft", () => {
+    const ready = {
+      timelineItems: {
+        nodes: [{ createdAt: "2026-01-01T00:00:00Z" }, { createdAt: "2026-01-05T00:00:00Z" }],
+      },
+    };
+    expect(timelineEnrichments(ready, "octocat", true).ready_for_review_at).toBe("2026-01-05T00:00:00Z");
+    expect(timelineEnrichments({ ...ready, isDraft: true }, "octocat", true).ready_for_review_at).toBeUndefined();
+  });
+});
+
+describe("fetchPrEnrichments", () => {
   it("batches all PRs into one GraphQL nodes(ids:) query and maps states", async () => {
     fetchMock.mockResolvedValueOnce(
       makeResponse({ body: graphqlBody({ n1: "SUCCESS", n2: "FAILURE", n3: "PENDING", n4: null }) })
     );
 
-    const statuses = await fetchCIStatuses("token", [
-      pr(1, { node_id: "n1" }),
-      pr(2, { node_id: "n2" }),
-      pr(3, { node_id: "n3" }),
-      pr(4, { node_id: "n4" }),
-    ]);
+    const enrichments = await fetchPrEnrichments(
+      "token",
+      [pr(1, { node_id: "n1" }), pr(2, { node_id: "n2" }), pr(3, { node_id: "n3" }), pr(4, { node_id: "n4" })],
+      "octocat",
+      true
+    );
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://api.github.com/graphql");
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body).variables.ids).toEqual(["n1", "n2", "n3", "n4"]);
-    expect(Object.fromEntries(statuses)).toEqual({ n1: "success", n2: "failure", n3: "pending" });
+    expect(enrichments.get("n1")).toEqual({ ci_status: "success", review_requested_at: undefined, ready_for_review_at: undefined });
+    expect(enrichments.get("n2")).toEqual({ ci_status: "failure", review_requested_at: undefined, ready_for_review_at: undefined });
+    expect(enrichments.get("n4")).toEqual({ review_requested_at: undefined, ready_for_review_at: undefined });
+  });
+
+  it("resolves review-request and ready times from the timeline events", async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeResponse({
+        body: graphqlBody(
+          { n1: "SUCCESS" },
+          {
+            n1: [
+              { createdAt: "2026-01-02T00:00:00Z", requestedReviewer: { login: "octocat" } },
+              { createdAt: "2026-01-01T00:00:00Z" },
+            ],
+          }
+        ),
+      })
+    );
+
+    const enrichments = await fetchPrEnrichments("token", [pr(1, { node_id: "n1" })], "octocat", true);
+
+    expect(enrichments.get("n1")).toEqual({
+      ci_status: "success",
+      review_requested_at: "2026-01-02T00:00:00Z",
+      ready_for_review_at: "2026-01-01T00:00:00Z",
+    });
   });
 
   it("chunks IDs into batches of 100", async () => {
     const prs = Array.from({ length: 150 }, (_, i) => pr(i, { node_id: `n${i}` }));
     fetchMock.mockImplementation(async () => makeResponse({ body: graphqlBody({}) }));
 
-    await fetchCIStatuses("token", prs);
+    await fetchPrEnrichments("token", prs, "octocat", true);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const firstIds = JSON.parse(fetchMock.mock.calls[0][1].body).variables.ids;
@@ -310,8 +376,8 @@ describe("fetchCIStatuses", () => {
   });
 
   it("skips the request entirely when no PR carries a node_id", async () => {
-    const statuses = await fetchCIStatuses("token", [pr(1), pr(2)]);
-    expect(statuses.size).toBe(0);
+    const enrichments = await fetchPrEnrichments("token", [pr(1), pr(2)], "octocat", true);
+    expect(enrichments.size).toBe(0);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -330,6 +396,47 @@ describe("CI status enrichment in fetchOpenPullRequests", () => {
 
     expect(errors).toEqual([]);
     expect(prs.map((p) => p.ci_status)).toEqual(["success", "failure"]);
+  });
+
+  it("attaches review-request and ready times from the team-inclusive review search", async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      url.startsWith("https://api.github.com/search")
+        ? makeResponse({ body: searchBody(items) })
+        : makeResponse({
+            body: graphqlBody(
+              { n1: "SUCCESS", n2: null },
+              {
+                n1: [
+                  { createdAt: "2026-01-02T00:00:00Z", requestedReviewer: { slug: "core" } },
+                  { createdAt: "2026-01-01T00:00:00Z" },
+                ],
+              }
+            ),
+          })
+    );
+
+    const { prs } = await fetchOpenPullRequests("token", ["acme/widgets"], "octocat", true);
+
+    // A team event matched because this search includes team requests
+    expect(prs[0].review_requested_at).toBe("2026-01-02T00:00:00Z");
+    expect(prs[0].ready_for_review_at).toBe("2026-01-01T00:00:00Z");
+  });
+
+  it("ignores team events in the author view — own PRs keep PR age", async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      url.startsWith("https://api.github.com/search")
+        ? makeResponse({ body: searchBody([pr(1, { user: { login: "octocat", avatar_url: "" }, node_id: "n1" })]) })
+        : makeResponse({
+            body: graphqlBody(
+              { n1: "SUCCESS" },
+              { n1: [{ createdAt: "2026-01-02T00:00:00Z", requestedReviewer: { slug: "core" } }] }
+            ),
+          })
+    );
+
+    const { prs } = await fetchMyOpenPullRequests("token", ["acme/widgets"], "octocat");
+
+    expect(prs[0].review_requested_at).toBeUndefined();
   });
 
   it("leaves the PR list intact when the GraphQL request is rate-limited", async () => {
@@ -351,7 +458,7 @@ describe("CI status enrichment in fetchOpenPullRequests", () => {
     expect(prs).toHaveLength(2);
     expect(prs.every((p) => p.ci_status === undefined)).toBe(true);
     expect(warn).toHaveBeenCalledWith(
-      "[BACKGROUND] CI status lookup failed; rendering PRs without CI icons:",
+      "[BACKGROUND] PR enrichment lookup failed; rendering PRs without CI icons or request times:",
       expect.objectContaining({ message: "GitHub GraphQL rate limit hit" })
     );
     warn.mockRestore();
