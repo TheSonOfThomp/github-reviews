@@ -29,6 +29,7 @@ let settingsRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 // putting network round trips on the startup critical path that gates the
 // first popup open after an extension reload (#16).
 let settingsReadyResolve!: () => void;
+let settingsLoaded = false;
 const settingsReady = new Promise<void>((resolve) => (settingsReadyResolve = resolve));
 
 type FetchContext = {
@@ -78,11 +79,11 @@ function invalidateFetches() {
   return settingsGeneration;
 }
 
-function scheduleSettingsRefresh(generation: number) {
+function scheduleSettingsRefresh() {
   if (settingsRefreshTimer) clearTimeout(settingsRefreshTimer);
   settingsRefreshTimer = setTimeout(() => {
     settingsRefreshTimer = undefined;
-    if (generation === settingsGeneration) refreshPullRequests();
+    refreshPullRequests();
   }, SETTINGS_REFRESH_DEBOUNCE_MS);
 }
 
@@ -135,6 +136,7 @@ const startSettings = async () => {
     if (username) saveCachedUsername(username);
   }
   console.log("[BACKGROUND] loaded settings, user:", username);
+  settingsLoaded = true;
   settingsReadyResolve();
 
   const cached = await readCache("review");
@@ -150,6 +152,7 @@ const startSettings = async () => {
 
 startSettings().catch((e) => {
   console.error("[BACKGROUND] settings load failed:", e);
+  settingsLoaded = true;
   settingsReadyResolve(); // never leave message handlers waiting forever
 });
 
@@ -159,9 +162,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM_NAME) refreshPullRequests();
 });
 
-chrome.storage.onChanged.addListener(async (changes, area) => {
-  if (area !== "sync") return;
-  await settingsReady;
+async function handleSettingsChange(changes: Record<string, chrome.storage.StorageChange>) {
   if (!changes.githubToken && !changes.repos && !changes.includeTeamRequests) return;
 
   const generation = invalidateFetches();
@@ -190,7 +191,16 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
     saveCachedUsername(username);
     console.log("[BACKGROUND] token updated, user:", username);
   }
-  scheduleSettingsRefresh(generation);
+  scheduleSettingsRefresh();
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "sync") return;
+  if (settingsLoaded) {
+    void handleSettingsChange(changes);
+  } else {
+    settingsReady.then(() => handleSettingsChange(changes));
+  }
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

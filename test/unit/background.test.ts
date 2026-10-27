@@ -210,6 +210,56 @@ describe("settings changes", () => {
     });
   });
 
+  it("ignores a superseded token lookup", async () => {
+    chromeMock = createChromeMock({
+      sync: { githubToken: "token", repos: ["acme/widgets"] },
+    });
+    await importBackground();
+    await vi.waitFor(() => {
+      expect(chromeMock.__stores.local[CACHE_STORAGE_KEY]).toBeDefined();
+    });
+
+    let oldTokenSignal: AbortSignal | undefined;
+    let resolveOldToken!: () => void;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "https://api.github.com/user") {
+        const authorization = (init?.headers as Record<string, string>).Authorization;
+        if (authorization === "Bearer token-2") {
+          oldTokenSignal = init?.signal ?? undefined;
+          return new Promise((resolve) => {
+            resolveOldToken = () => resolve(makeResponse({ body: { login: "stale-user" } }));
+          });
+        }
+        if (authorization === "Bearer token-3") {
+          return Promise.resolve(makeResponse({ body: { login: "octocat" } }));
+        }
+      }
+      if (url.startsWith("https://api.github.com/search/issues")) {
+        return Promise.resolve(makeResponse({ body: { total_count: PRS.length, incomplete_results: false, items: PRS } }));
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    chromeMock.storage.sync.set({ githubToken: "token-2" });
+    await vi.waitFor(() => expect(oldTokenSignal).toBeDefined());
+    await flush();
+    chromeMock.storage.sync.set({ githubToken: "token-3" });
+    await vi.waitFor(() => expect(oldTokenSignal?.aborted).toBe(true));
+    resolveOldToken();
+
+    await vi.waitFor(
+      () =>
+        expect(fetchMock).toHaveBeenCalledWith(
+          "https://api.github.com/search/issues?q=" +
+            encodeURIComponent("repo:acme/widgets is:pr is:open review-requested:octocat") +
+            "&per_page=100",
+          expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer token-3" }) })
+        ),
+      { timeout: 2_000 }
+    );
+    expect(chromeMock.__stores.local.githubUsername).toBe("octocat");
+  });
+
   it("aborts an old fetch and never lets it replace the cache after repos change", async () => {
     chromeMock = createChromeMock({
       sync: { githubToken: "token", repos: ["acme/widgets"] },
@@ -243,6 +293,7 @@ describe("settings changes", () => {
     await vi.waitFor(() => expect(oldRequestSignal).toBeDefined());
 
     chromeMock.storage.sync.set({ repos: ["acme/gadgets"] });
+    await flush();
     await vi.waitFor(
       () => {
         const cache = chromeMock.__stores.local[CACHE_STORAGE_KEY] as Record<string, CacheEntry>;
@@ -251,7 +302,7 @@ describe("settings changes", () => {
       },
       { timeout: 2_000 }
     );
-    expect(oldRequestSignal?.aborted).toBe(true);
+    await vi.waitFor(() => expect(oldRequestSignal?.aborted).toBe(true));
 
     // Simulate the response winning the abort race: it must still be ignored.
     resolveOldRequest();
