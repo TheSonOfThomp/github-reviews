@@ -213,7 +213,9 @@ test(
     expect(mineWithReviewStatus.length).toBeGreaterThan(0);
     await expect(page.getByRole("img", { name: /^Review status: / })).toHaveCount(mineWithReviewStatus.length);
     await expect(page.getByRole("img", { name: "Review status: Approved" })).toHaveCount(1);
+    await expect(page.getByRole("img", { name: "Review status: Awaiting review" })).toHaveCount(1);
     await expect(page.getByRole("img", { name: "Review status: Changes requested" })).toHaveCount(1);
+    await expect(page.getByRole("img", { name: "Review status: Comments pending" })).toHaveCount(1);
   }
 );
 

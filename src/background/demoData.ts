@@ -132,9 +132,16 @@ function demoAllPullsForRepo(repo: string, reviewerLogin: string): DemoPull[] {
     pulls.push({ ...pr, requested_reviewers: [...pr.requested_reviewers, { login: reviewerLogin }] });
   }
 
-  // Always include these two author-side states so the demo and E2E popup
-  // show the review-status indicators without relying on random IDs.
-  pulls.push(...fakePRsForRepo(repo, 2, DEMO_USERNAME, ["approved", "changes-requested"]));
+  // Always include every author-side state so the demo and E2E popup show
+  // each review-status indicator without relying on random IDs.
+  pulls.push(
+    ...fakePRsForRepo(repo, 4, DEMO_USERNAME, [
+      "approved",
+      "awaiting-review",
+      "changes-requested",
+      "comments-pending",
+    ])
+  );
 
   const noiseCount = faker.number.int({ min: 0, max: 2 });
   pulls.push(...fakePRsForRepo(repo, noiseCount, faker.internet.username()));
