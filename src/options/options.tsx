@@ -42,7 +42,6 @@ export const OptionsPage = () => {
   const [showToken, setShowToken] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
-  const tokenDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bannerExitRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bannerRemoveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -182,12 +181,8 @@ export const OptionsPage = () => {
             <TextInput
               type={showToken ? "text" : "password"}
               value={settings.githubToken}
-              onChange={(e) => {
-                const updated = { ...settings, githubToken: e.target.value };
-                setSettings(updated);
-                if (tokenDebounceRef.current) clearTimeout(tokenDebounceRef.current);
-                tokenDebounceRef.current = setTimeout(() => saveSettings(updated), 800);
-              }}
+              onChange={(e) => setSettings({ ...settings, githubToken: e.target.value })}
+              onBlur={() => saveSettings(settings)}
               placeholder="ghp_..."
               monospace
               block
