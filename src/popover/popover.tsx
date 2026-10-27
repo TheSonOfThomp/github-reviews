@@ -13,7 +13,7 @@ import {
   IconButton,
   SegmentedControl,
 } from "@primer/react";
-import { CheckIcon, CommentDiscussionIcon, DotFillIcon, GearIcon, GitPullRequestIcon, GitPullRequestDraftIcon, LinkExternalIcon, SyncIcon, XIcon } from "@primer/octicons-react";
+import { CheckCircleIcon, CheckIcon, CommentIcon, DotFillIcon, EyeIcon, FileDiffIcon, GearIcon, GitPullRequestIcon, GitPullRequestDraftIcon, LinkExternalIcon, SyncIcon, XIcon } from "@primer/octicons-react";
 import type { CIStatus, PullRequest, RepoError, ReviewStatus } from "../background/fetchPullRequests";
 import { readCache } from "../background/reviewCache";
 import { DEFAULT_INCLUDE_TEAM_REQUESTS, DEFAULT_SHOW_WAIT_TIME, DEFAULT_WAIT_TIME_SLA_HOURS } from "../settings";
@@ -85,10 +85,10 @@ const CI_STATUS_META: Record<CIStatus, { Icon: typeof CheckIcon; color: string; 
 };
 
 const REVIEW_STATUS_META: Record<ReviewStatus, { Icon: typeof CheckIcon; color: string; label: string }> = {
-  approved: { Icon: CheckIcon, color: "var(--fgColor-success)", label: "Review status: Approved" },
-  "awaiting-review": { Icon: DotFillIcon, color: "var(--fgColor-attention)", label: "Review status: Awaiting review" },
-  "changes-requested": { Icon: XIcon, color: "var(--fgColor-danger)", label: "Review status: Changes requested" },
-  "comments-pending": { Icon: CommentDiscussionIcon, color: "var(--fgColor-accent)", label: "Review status: Comments pending" },
+  approved: { Icon: CheckCircleIcon, color: "var(--fgColor-success)", label: "Review status: Approved" },
+  "awaiting-review": { Icon: EyeIcon, color: "var(--fgColor-attention)", label: "Review status: Awaiting review" },
+  "changes-requested": { Icon: FileDiffIcon, color: "var(--fgColor-danger)", label: "Review status: Changes requested" },
+  "comments-pending": { Icon: CommentIcon, color: "var(--fgColor-muted)", label: "Review status: Comments pending" },
 };
 
 const ReviewStatusIcon = ({ pr }: { pr: PullRequest }) => {
