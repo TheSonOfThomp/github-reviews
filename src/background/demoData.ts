@@ -1,5 +1,5 @@
 import { faker } from "@faker-js/faker";
-import type { CIStatus, FetchPullRequestsResult, PullRequest } from "./fetchPullRequests";
+import type { CIStatus, FetchPullRequestsResult, PullRequest, ReviewStatus } from "./fetchPullRequests";
 
 // Seed lazily (not at module top level) so the module has no initialization
 // side effects that could defeat tree-shaking in production builds
@@ -78,8 +78,13 @@ function fakeCIStatus(): CIStatus | undefined {
   return undefined;
 }
 
-function fakePRsForRepo(repo: string, count: number, authorLogin: string): DemoPull[] {
-  return Array.from({ length: count }, () => {
+function fakePRsForRepo(
+  repo: string,
+  count: number,
+  authorLogin: string,
+  reviewStatuses: ReviewStatus[] = []
+): DemoPull[] {
+  return Array.from({ length: count }, (_, index) => {
     const number = faker.number.int({ min: 100, max: 9999 });
     const created = new Date(
       (faker.defaultRefDate?.() ?? new Date()).getTime() -
@@ -90,6 +95,7 @@ function fakePRsForRepo(repo: string, count: number, authorLogin: string): DemoP
       id,
       node_id: `PR_node_${id}`,
       ci_status: fakeCIStatus(),
+      ...(reviewStatuses[index] ? { review_status: reviewStatuses[index] } : {}),
       number,
       title: faker.hacker.phrase(),
       html_url: `https://github.com/${repo}/pull/${number}`,
@@ -126,8 +132,16 @@ function demoAllPullsForRepo(repo: string, reviewerLogin: string): DemoPull[] {
     pulls.push({ ...pr, requested_reviewers: [...pr.requested_reviewers, { login: reviewerLogin }] });
   }
 
-  const mineCount = faker.number.int({ min: 1, max: 3 });
-  pulls.push(...fakePRsForRepo(repo, mineCount, DEMO_USERNAME));
+  // Always include every author-side state so the demo and E2E popup show
+  // each review-status indicator without relying on random IDs.
+  pulls.push(
+    ...fakePRsForRepo(repo, 4, DEMO_USERNAME, [
+      "approved",
+      "awaiting-review",
+      "changes-requested",
+      "comments-pending",
+    ])
+  );
 
   const noiseCount = faker.number.int({ min: 0, max: 2 });
   pulls.push(...fakePRsForRepo(repo, noiseCount, faker.internet.username()));

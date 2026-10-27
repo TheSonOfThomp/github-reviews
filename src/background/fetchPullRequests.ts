@@ -5,6 +5,7 @@ import {
 } from "./demoData";
 
 export type CIStatus = "success" | "failure" | "pending";
+export type ReviewStatus = "approved" | "awaiting-review" | "changes-requested" | "comments-pending";
 
 export interface PullRequest {
   id: number;
@@ -25,6 +26,8 @@ export interface PullRequest {
   ready_for_review_at?: string;
   /** Combined check/status state of the head commit; undefined = no checks (or lookup failed). */
   ci_status?: CIStatus;
+  /** Author-facing state from the latest submitted reviews; undefined when enrichment fails. */
+  review_status?: ReviewStatus;
 }
 
 export interface RepoError {
@@ -80,6 +83,8 @@ const PR_ENRICHMENT_QUERY = `
         commits(last: 1) {
           nodes { commit { statusCheckRollup { state } } }
         }
+        reviewDecision
+        latestReviews(first: 100) { nodes { state } }
         timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT, READY_FOR_REVIEW_EVENT], last: 100) {
           nodes {
             ... on ReviewRequestedEvent {
@@ -95,6 +100,8 @@ const PR_ENRICHMENT_QUERY = `
 `;
 
 type StatusCheckRollupState = "SUCCESS" | "FAILURE" | "ERROR" | "PENDING" | "EXPECTED";
+type ReviewDecision = "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED";
+type PullRequestReviewState = "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED" | "PENDING";
 
 /** Maps the combined statusCheckRollup state onto the popover's icon states. */
 export const rollupStateToCIStatus = (state: StatusCheckRollupState | null | undefined): CIStatus | undefined => {
@@ -126,14 +133,28 @@ interface GraphQLNode {
   id?: string;
   isDraft?: boolean;
   commits?: { nodes?: Array<{ commit?: { statusCheckRollup?: { state?: StatusCheckRollupState } | null } }> };
+  reviewDecision?: ReviewDecision | null;
+  latestReviews?: { nodes?: Array<{ state?: PullRequestReviewState }> };
   timelineItems?: { nodes?: TimelineEvent[] };
 }
 
 export interface PrEnrichment {
   ci_status?: CIStatus;
+  review_status?: ReviewStatus;
   review_requested_at?: string;
   ready_for_review_at?: string;
 }
+
+/** Maps GitHub's merge decision and latest reviewer states onto one author-facing status. */
+export const reviewStatus = (
+  decision: ReviewDecision | null | undefined,
+  latestReviewStates: Array<PullRequestReviewState | undefined>
+): ReviewStatus => {
+  if (decision === "CHANGES_REQUESTED") return "changes-requested";
+  if (latestReviewStates.includes("COMMENTED")) return "comments-pending";
+  if (decision === "APPROVED") return "approved";
+  return "awaiting-review";
+};
 
 /** Latest matching review_requested event, and the latest ready-for-review time (#26). */
 export const timelineEnrichments = (
@@ -207,6 +228,12 @@ export async function fetchPrEnrichments(
     for (const node of data.data.nodes) {
       if (!node?.id) continue;
       const enrichment: PrEnrichment = { ...timelineEnrichments(node, username, matchTeams) };
+      if (node.reviewDecision !== undefined || node.latestReviews !== undefined) {
+        enrichment.review_status = reviewStatus(
+          node.reviewDecision,
+          (node.latestReviews?.nodes ?? []).map((review) => review.state)
+        );
+      }
       const status = rollupStateToCIStatus(node?.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state);
       if (status) enrichment.ci_status = status;
       enrichments.set(node.id, enrichment);
@@ -304,9 +331,9 @@ async function fetchPRsFromRepos(
     }
   });
 
-  // Attach CI statuses and review-request timestamps from the batched GraphQL
-  // lookup. A failed lookup (network, rate limit, token missing scopes) must
-  // not fail the refresh — render the PRs without them instead (#32/#26).
+  // Attach CI, author-review, and review-request metadata from the batched
+  // GraphQL lookup. A failed lookup (network, rate limit, token missing
+  // scopes) must not fail the refresh — render the PRs without it instead (#32/#26).
   // Team timeline events only count in the team-inclusive review search; the
   // author view's own PRs would otherwise inherit their reviewers' requests.
   try {
@@ -321,7 +348,7 @@ async function fetchPRsFromRepos(
       if (enrichment) Object.assign(pr, enrichment);
     }
   } catch (e) {
-    console.warn("[BACKGROUND] PR enrichment lookup failed; rendering PRs without CI icons or request times:", e);
+    console.warn("[BACKGROUND] PR enrichment lookup failed; rendering PRs without enrichment metadata:", e);
   }
 
   console.log(
