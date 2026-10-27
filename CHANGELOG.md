@@ -1,5 +1,12 @@
 # chrome-extension
 
+## 0.4.1
+
+### Patch Changes
+
+- 2a14a38: Prevent stale pull-request fetches from updating review data after settings change.
+- abdf8f0: Show review statuses for open pull requests you author.
+
 ## 0.4.0
 
 ### Minor Changes
