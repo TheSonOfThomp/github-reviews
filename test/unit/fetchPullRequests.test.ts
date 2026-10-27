@@ -4,6 +4,7 @@ import {
   fetchPrEnrichments,
   fetchOpenPullRequests,
   fetchMyOpenPullRequests,
+  reviewStatus,
   rollupStateToCIStatus,
   searchUrl,
   timelineEnrichments,
@@ -254,15 +255,35 @@ describe("fetchOpenPullRequests", () => {
   });
 });
 
-/** GraphQL response body mapping node IDs to statusCheckRollup states (+ optional timeline events). */
-const graphqlBody = (states: Record<string, string | null>, timelines: Record<string, object[]> = {}) => ({
+/** GraphQL response body mapping node IDs to statusCheckRollup states (+ optional enrichment fields). */
+const graphqlBody = (
+  states: Record<string, string | null>,
+  timelines: Record<string, object[]> = {},
+  reviews: Record<string, { decision: string | null; states: string[] }> = {}
+) => ({
   data: {
     nodes: Object.entries(states).map(([id, state]) => ({
       id,
       commits: { nodes: [{ commit: { statusCheckRollup: { state } } }] },
       ...(timelines[id] ? { timelineItems: { nodes: timelines[id] } } : {}),
+      ...(reviews[id]
+        ? {
+            reviewDecision: reviews[id].decision,
+            latestReviews: { nodes: reviews[id].states.map((state) => ({ state })) },
+          }
+        : {}),
     })),
   },
+});
+
+describe("reviewStatus", () => {
+  it("maps GitHub review decisions and latest COMMENTED reviews to one author status", () => {
+    expect(reviewStatus("CHANGES_REQUESTED", ["COMMENTED"])).toBe("changes-requested");
+    expect(reviewStatus("APPROVED", ["COMMENTED"])).toBe("comments-pending");
+    expect(reviewStatus("APPROVED", ["APPROVED"])).toBe("approved");
+    expect(reviewStatus("REVIEW_REQUIRED", [])).toBe("awaiting-review");
+    expect(reviewStatus(null, ["DISMISSED"])).toBe("awaiting-review");
+  });
 });
 
 describe("rollupStateToCIStatus", () => {
@@ -362,6 +383,37 @@ describe("fetchPrEnrichments", () => {
     });
   });
 
+  it("attaches review statuses from the decision and latest reviews", async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeResponse({
+        body: graphqlBody(
+          { n1: "SUCCESS", n2: "SUCCESS", n3: "SUCCESS", n4: "SUCCESS" },
+          {},
+          {
+            n1: { decision: "APPROVED", states: ["APPROVED"] },
+            n2: { decision: "APPROVED", states: ["COMMENTED"] },
+            n3: { decision: "CHANGES_REQUESTED", states: ["COMMENTED"] },
+            n4: { decision: null, states: [] },
+          }
+        ),
+      })
+    );
+
+    const enrichments = await fetchPrEnrichments(
+      "token",
+      [pr(1, { node_id: "n1" }), pr(2, { node_id: "n2" }), pr(3, { node_id: "n3" }), pr(4, { node_id: "n4" })],
+      "octocat",
+      true
+    );
+
+    expect([...enrichments.values()].map((enrichment) => enrichment.review_status)).toEqual([
+      "approved",
+      "comments-pending",
+      "changes-requested",
+      "awaiting-review",
+    ]);
+  });
+
   it("chunks IDs into batches of 100", async () => {
     const prs = Array.from({ length: 150 }, (_, i) => pr(i, { node_id: `n${i}` }));
     fetchMock.mockImplementation(async () => makeResponse({ body: graphqlBody({}) }));
@@ -458,7 +510,7 @@ describe("CI status enrichment in fetchOpenPullRequests", () => {
     expect(prs).toHaveLength(2);
     expect(prs.every((p) => p.ci_status === undefined)).toBe(true);
     expect(warn).toHaveBeenCalledWith(
-      "[BACKGROUND] PR enrichment lookup failed; rendering PRs without CI icons or request times:",
+      "[BACKGROUND] PR enrichment lookup failed; rendering PRs without enrichment metadata:",
       expect.objectContaining({ message: "GitHub GraphQL rate limit hit" })
     );
     warn.mockRestore();

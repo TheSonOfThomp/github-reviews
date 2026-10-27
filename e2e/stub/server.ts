@@ -79,6 +79,14 @@ export class GitHubStubServer {
     return null;
   }
 
+  private reviewFor(nodeId: string): { decision: string | null; state: string } {
+    const hash = [...nodeId].reduce((acc, ch) => acc + ch.charCodeAt(0), 0) % 10;
+    if (hash <= 1) return { decision: "CHANGES_REQUESTED", state: "CHANGES_REQUESTED" };
+    if (hash <= 3) return { decision: "APPROVED", state: hash === 3 ? "COMMENTED" : "APPROVED" };
+    if (hash <= 5) return { decision: "REVIEW_REQUIRED", state: "PENDING" };
+    return { decision: null, state: hash === 6 ? "COMMENTED" : "PENDING" };
+  }
+
   private handle(req: IncomingMessage, res: ServerResponse): void {
     const sendJson = (status: number, body: unknown, headers: Record<string, string> = {}) => {
       res.statusCode = status;
@@ -122,12 +130,15 @@ export class GitHubStubServer {
               if (served?.item.ready_for_review_at) {
                 timeline.push({ createdAt: served.item.ready_for_review_at });
               }
+              const review = this.reviewFor(id);
               return {
                 id,
                 isDraft: !served?.item.ready_for_review_at,
                 commits: {
                   nodes: [{ commit: { statusCheckRollup: { state: this.rollupStateFor(id) } } }],
                 },
+                reviewDecision: review.decision,
+                latestReviews: { nodes: [{ state: review.state }] },
                 ...(timeline.length ? { timelineItems: { nodes: timeline } } : {}),
               };
             }),

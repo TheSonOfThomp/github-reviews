@@ -192,6 +192,7 @@ test(
     await seedSettings(page, SETTINGS);
     await page.reload();
     const review = await settledEntry(page, "review");
+    await expect(page.getByRole("img", { name: /^Review status: / })).toHaveCount(0);
 
     await page.getByRole("button", { name: "My Open PRs" }).click();
 
@@ -206,6 +207,10 @@ test(
     const mineWithCI = mine.prs.slice(0, 10).filter((pr) => pr.ci_status);
     expect(mineWithCI.length).toBeGreaterThan(0);
     await expect(page.getByRole("link", { name: /^CI: / })).toHaveCount(mineWithCI.length);
+
+    const mineWithReviewStatus = mine.prs.slice(0, 10).filter((pr) => pr.review_status);
+    expect(mineWithReviewStatus.length).toBeGreaterThan(0);
+    await expect(page.getByRole("img", { name: /^Review status: / })).toHaveCount(mineWithReviewStatus.length);
   }
 );
 

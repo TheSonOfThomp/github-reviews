@@ -1,5 +1,5 @@
 import { faker } from "@faker-js/faker";
-import type { CIStatus, FetchPullRequestsResult, PullRequest } from "./fetchPullRequests";
+import type { CIStatus, FetchPullRequestsResult, PullRequest, ReviewStatus } from "./fetchPullRequests";
 
 // Seed lazily (not at module top level) so the module has no initialization
 // side effects that could defeat tree-shaking in production builds
@@ -77,6 +77,9 @@ function fakeCIStatus(): CIStatus | undefined {
   if (roll <= 9) return "pending";
   return undefined;
 }
+
+const demoReviewStatus = (id: number): ReviewStatus =>
+  ["approved", "awaiting-review", "changes-requested", "comments-pending"][hashInt(id) % 4] as ReviewStatus;
 
 function fakePRsForRepo(repo: string, count: number, authorLogin: string): DemoPull[] {
   return Array.from({ length: count }, () => {
@@ -180,6 +183,7 @@ export function demoSearchPullsForRepo(
           Date.parse(pr.created_at) + ((hash % 7) * 8) * 3_600_000
         ).toISOString();
       }
+      if (qualifier === "author") out.review_status = demoReviewStatus(pr.id);
       return out;
     });
 }

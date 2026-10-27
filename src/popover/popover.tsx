@@ -13,8 +13,8 @@ import {
   IconButton,
   SegmentedControl,
 } from "@primer/react";
-import { CheckIcon, DotFillIcon, GearIcon, GitPullRequestIcon, GitPullRequestDraftIcon, LinkExternalIcon, SyncIcon, XIcon } from "@primer/octicons-react";
-import type { CIStatus, PullRequest, RepoError } from "../background/fetchPullRequests";
+import { CheckIcon, CommentDiscussionIcon, DotFillIcon, GearIcon, GitPullRequestIcon, GitPullRequestDraftIcon, LinkExternalIcon, SyncIcon, XIcon } from "@primer/octicons-react";
+import type { CIStatus, PullRequest, RepoError, ReviewStatus } from "../background/fetchPullRequests";
 import { readCache } from "../background/reviewCache";
 import { DEFAULT_INCLUDE_TEAM_REQUESTS, DEFAULT_SHOW_WAIT_TIME, DEFAULT_WAIT_TIME_SLA_HOURS } from "../settings";
 import { isPastSla, waitBasis, waitTimeLabel, waitTimeTitle } from "./waitTime";
@@ -82,6 +82,23 @@ const CI_STATUS_META: Record<CIStatus, { Icon: typeof CheckIcon; color: string; 
   success: { Icon: CheckIcon, color: "var(--fgColor-success)", label: "CI: passing" },
   failure: { Icon: XIcon, color: "var(--fgColor-danger)", label: "CI: failing" },
   pending: { Icon: DotFillIcon, color: "var(--fgColor-attention)", label: "CI: pending" },
+};
+
+const REVIEW_STATUS_META: Record<ReviewStatus, { Icon: typeof CheckIcon; color: string; label: string }> = {
+  approved: { Icon: CheckIcon, color: "var(--fgColor-success)", label: "Review status: Approved" },
+  "awaiting-review": { Icon: DotFillIcon, color: "var(--fgColor-attention)", label: "Review status: Awaiting review" },
+  "changes-requested": { Icon: XIcon, color: "var(--fgColor-danger)", label: "Review status: Changes requested" },
+  "comments-pending": { Icon: CommentDiscussionIcon, color: "var(--fgColor-accent)", label: "Review status: Comments pending" },
+};
+
+const ReviewStatusIcon = ({ pr }: { pr: PullRequest }) => {
+  if (!pr.review_status) return null;
+  const { Icon, color, label } = REVIEW_STATUS_META[pr.review_status];
+  return (
+    <span role="img" title={label} aria-label={label} style={{ flexShrink: 0, color, display: "flex" }}>
+      <Icon size={16} aria-hidden="true" />
+    </span>
+  );
 };
 
 const CIStatusLink = ({ pr }: { pr: PullRequest }) => {
@@ -421,6 +438,7 @@ const PullRequestList = ({
                 #{pr.number} {pr.title}
               </Link>
               {showWaitTime && <WaitTime pr={pr} slaHours={waitTimeSlaHours} />}
+              {viewMode === "mine" && <ReviewStatusIcon pr={pr} />}
               <CIStatusLink pr={pr} />
             </Stack>
           ))}
