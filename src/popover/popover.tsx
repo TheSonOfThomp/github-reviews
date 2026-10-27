@@ -437,7 +437,7 @@ const PullRequestList = ({
               >
                 #{pr.number} {pr.title}
               </Link>
-              {showWaitTime && <WaitTime pr={pr} slaHours={waitTimeSlaHours} />}
+              {viewMode === "review" && showWaitTime && <WaitTime pr={pr} slaHours={waitTimeSlaHours} />}
               {viewMode === "mine" && <ReviewStatusIcon pr={pr} />}
               <CIStatusLink pr={pr} />
             </Stack>

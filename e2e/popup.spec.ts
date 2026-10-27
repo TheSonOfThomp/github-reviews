@@ -197,6 +197,7 @@ test(
     await page.getByRole("button", { name: "My Open PRs" }).click();
 
     const mine = await settledEntry(page, "mine");
+    await expect(page.locator(".wait-time")).toHaveCount(0);
     // The real mine filter ran: every cached PR is authored by the demo user
     expect(mine.prs.every((pr) => pr.user.login === "demo-user")).toBe(true);
     // And it is a different set from the review view
