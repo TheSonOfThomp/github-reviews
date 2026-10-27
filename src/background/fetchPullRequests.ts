@@ -44,10 +44,11 @@ const githubHeaders = (token: string) => ({
   "X-GitHub-Api-Version": "2022-11-28",
 });
 
-export async function fetchAuthenticatedUser(githubToken: string): Promise<string> {
+export async function fetchAuthenticatedUser(githubToken: string, signal?: AbortSignal): Promise<string> {
   if (process.env.DEMO_MODE === "true") return demoFetchAuthenticatedUser();
   const response = await fetch("https://api.github.com/user", {
     headers: githubHeaders(githubToken),
+    signal,
   });
   if (!response.ok) {
     throw new Error(`Failed to fetch authenticated user: ${response.status} ${response.statusText}`);
@@ -174,7 +175,8 @@ export async function fetchPrEnrichments(
   githubToken: string,
   prs: PullRequest[],
   username: string,
-  matchTeams: boolean
+  matchTeams: boolean,
+  signal?: AbortSignal
 ): Promise<Map<string, PrEnrichment>> {
   const enrichments = new Map<string, PrEnrichment>();
   const ids = prs.map((pr) => pr.node_id).filter((id): id is string => Boolean(id));
@@ -184,6 +186,7 @@ export async function fetchPrEnrichments(
       method: "POST",
       headers: { ...githubHeaders(githubToken), "Content-Type": "application/json" },
       body: JSON.stringify({ query: PR_ENRICHMENT_QUERY, variables: { ids: chunk } }),
+      signal,
     });
 
     if (!response.ok) {
@@ -241,7 +244,8 @@ async function fetchPRsFromRepos(
   repos: string[],
   username: string,
   qualifierKey: "review-requested" | "user-review-requested" | "author",
-  logLabel: string
+  logLabel: string,
+  signal?: AbortSignal
 ): Promise<FetchPullRequestsResult> {
   if (!githubToken) {
     console.warn("[BACKGROUND] no GitHub token set");
@@ -262,6 +266,7 @@ async function fetchPRsFromRepos(
       console.log(`[BACKGROUND] searching ${logLabel} in ${repo} (${qualifier})`);
       const response = await fetch(searchUrl(repo, qualifier), {
         headers: githubHeaders(githubToken),
+        signal,
       });
 
       if (!response.ok) return { prs: [], error: errorForResponse(repo, response) };
@@ -286,6 +291,8 @@ async function fetchPRsFromRepos(
       return { prs: data.items.map((pr) => ({ ...pr, repo })) };
     })
   );
+
+  if (signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
 
   const prs: PullRequest[] = [];
   const errors: RepoError[] = [];
@@ -314,13 +321,15 @@ async function fetchPRsFromRepos(
       githubToken,
       prs,
       username,
-      qualifierKey === "review-requested"
+      qualifierKey === "review-requested",
+      signal
     );
     for (const pr of prs) {
       const enrichment = pr.node_id ? enrichments.get(pr.node_id) : undefined;
       if (enrichment) Object.assign(pr, enrichment);
     }
   } catch (e) {
+    if (signal?.aborted) throw e;
     console.warn("[BACKGROUND] PR enrichment lookup failed; rendering PRs without CI icons or request times:", e);
   }
 
@@ -334,7 +343,8 @@ export async function fetchOpenPullRequests(
   githubToken: string,
   repos: string[],
   username: string,
-  includeTeamRequests: boolean
+  includeTeamRequests: boolean,
+  signal?: AbortSignal
 ): Promise<FetchPullRequestsResult> {
   if (process.env.DEMO_MODE === "true")
     return demoFetchOpenPullRequests(githubToken, repos, username, includeTeamRequests);
@@ -343,14 +353,16 @@ export async function fetchOpenPullRequests(
     repos,
     username,
     includeTeamRequests ? "review-requested" : "user-review-requested",
-    "PRs awaiting review"
+    "PRs awaiting review",
+    signal
   );
 }
 
 export async function fetchMyOpenPullRequests(
   githubToken: string,
   repos: string[],
-  username: string
+  username: string,
+  signal?: AbortSignal
 ): Promise<FetchPullRequestsResult> {
   if (process.env.DEMO_MODE === "true") return demoFetchMyOpenPullRequests(githubToken, repos, username);
   return fetchPRsFromRepos(
@@ -358,6 +370,7 @@ export async function fetchMyOpenPullRequests(
     repos,
     username,
     "author",
-    "my open PRs"
+    "my open PRs",
+    signal
   );
 }

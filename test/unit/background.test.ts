@@ -209,6 +209,57 @@ describe("settings changes", () => {
       );
     });
   });
+
+  it("aborts an old fetch and never lets it replace the cache after repos change", async () => {
+    chromeMock = createChromeMock({
+      sync: { githubToken: "token", repos: ["acme/widgets"] },
+    });
+    await importBackground();
+    await vi.waitFor(() => {
+      expect(chromeMock.__stores.local[CACHE_STORAGE_KEY]).toBeDefined();
+    });
+
+    let oldRequestSignal: AbortSignal | undefined;
+    let resolveOldRequest!: () => void;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes("acme%2Fwidgets")) {
+        oldRequestSignal = init?.signal ?? undefined;
+        return new Promise((resolve) => {
+          resolveOldRequest = () =>
+            resolve(makeResponse({ body: { total_count: 1, incomplete_results: false, items: [PRS[0]] } }));
+        });
+      }
+      if (url.includes("acme%2Fgadgets")) {
+        return Promise.resolve(
+          makeResponse({
+            body: { total_count: 1, incomplete_results: false, items: [{ ...PRS[1], title: "New repo PR" }] },
+          })
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    chromeMock.__fireAlarm("poll-pull-requests");
+    await vi.waitFor(() => expect(oldRequestSignal).toBeDefined());
+
+    chromeMock.storage.sync.set({ repos: ["acme/gadgets"] });
+    await vi.waitFor(
+      () => {
+        const cache = chromeMock.__stores.local[CACHE_STORAGE_KEY] as Record<string, CacheEntry>;
+        expect(cache?.review?.repos).toEqual(["acme/gadgets"]);
+        expect(cache?.review?.prs[0]?.title).toBe("New repo PR");
+      },
+      { timeout: 2_000 }
+    );
+    expect(oldRequestSignal?.aborted).toBe(true);
+
+    // Simulate the response winning the abort race: it must still be ignored.
+    resolveOldRequest();
+    await flush();
+    const cache = chromeMock.__stores.local[CACHE_STORAGE_KEY] as Record<string, CacheEntry>;
+    expect(cache.review.repos).toEqual(["acme/gadgets"]);
+    expect(cache.review.prs[0]?.title).toBe("New repo PR");
+  });
 });
 
 describe("includeTeamRequests setting (#27)", () => {

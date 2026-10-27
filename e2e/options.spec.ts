@@ -1,4 +1,10 @@
 import { test, expect } from "./fixtures/extension";
+import type { Page } from "@playwright/test";
+
+const syncSettings = (page: Page) =>
+  page.evaluate(
+    () => new Promise<Record<string, unknown>>((resolve) => chrome.storage.sync.get(resolve))
+  );
 
 test(
   "settings page shows configured repos and links out to GitHub",
@@ -33,3 +39,15 @@ test(
     );
   }
 );
+
+test("saves a token only when its field loses focus", async ({ context, extensionId }) => {
+  const page = await context.newPage();
+  await page.goto(`chrome-extension://${extensionId}/options.html`);
+
+  const token = page.getByLabel("GitHub Personal Access Token");
+  await token.fill("ghp_new-token");
+  expect((await syncSettings(page)).githubToken).not.toBe("ghp_new-token");
+
+  await token.blur();
+  await expect.poll(async () => (await syncSettings(page)).githubToken).toBe("ghp_new-token");
+});
