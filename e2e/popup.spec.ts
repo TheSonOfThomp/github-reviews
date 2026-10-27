@@ -212,10 +212,16 @@ test(
     const mineWithReviewStatus = mine.prs.slice(0, 10).filter((pr) => pr.review_status);
     expect(mineWithReviewStatus.length).toBeGreaterThan(0);
     await expect(page.getByRole("img", { name: /^Review status: / })).toHaveCount(mineWithReviewStatus.length);
-    await expect(page.getByRole("img", { name: "Review status: Approved" })).toHaveCount(1);
-    await expect(page.getByRole("img", { name: "Review status: Awaiting review" })).toHaveCount(1);
-    await expect(page.getByRole("img", { name: "Review status: Changes requested" })).toHaveCount(1);
-    await expect(page.getByRole("img", { name: "Review status: Comments pending" })).toHaveCount(1);
+    for (const label of [
+      "Review status: Approved",
+      "Review status: Awaiting review",
+      "Review status: Changes requested",
+      "Review status: Comments pending",
+    ]) {
+      const icon = page.getByRole("img", { name: label });
+      await expect(icon).toHaveCount(1);
+      await expect(icon).toHaveAttribute("title", label);
+    }
   }
 );
 
