@@ -43,7 +43,10 @@ export class GitHubStubServer {
   /** The `ids` variable of every GraphQL request, in order. */
   graphqlIdBatches: string[][] = [];
   /** Search items served, by node ID — the source for GraphQL timeline events. */
-  private servedItems = new Map<string, { item: { review_requested_at?: string; ready_for_review_at?: string }; login: string }>();
+  private servedItems = new Map<string, {
+    item: { review_requested_at?: string; ready_for_review_at?: string; review_status?: string };
+    login: string;
+  }>();
   /**
    * Seeds the generated PRs together with the repo: every search for a repo
    * returns the same underlying PR set (so different qualifiers filter the
@@ -79,7 +82,11 @@ export class GitHubStubServer {
     return null;
   }
 
-  private reviewFor(nodeId: string): { decision: string | null; state: string } {
+  private reviewFor(nodeId: string, reviewStatus?: string): { decision: string | null; state: string } {
+    if (reviewStatus === "approved") return { decision: "APPROVED", state: "APPROVED" };
+    if (reviewStatus === "changes-requested") return { decision: "CHANGES_REQUESTED", state: "CHANGES_REQUESTED" };
+    if (reviewStatus === "comments-pending") return { decision: "APPROVED", state: "COMMENTED" };
+    if (reviewStatus === "awaiting-review") return { decision: "REVIEW_REQUIRED", state: "PENDING" };
     const hash = [...nodeId].reduce((acc, ch) => acc + ch.charCodeAt(0), 0) % 10;
     if (hash <= 1) return { decision: "CHANGES_REQUESTED", state: "CHANGES_REQUESTED" };
     if (hash <= 3) return { decision: "APPROVED", state: hash === 3 ? "COMMENTED" : "APPROVED" };
@@ -130,7 +137,7 @@ export class GitHubStubServer {
               if (served?.item.ready_for_review_at) {
                 timeline.push({ createdAt: served.item.ready_for_review_at });
               }
-              const review = this.reviewFor(id);
+              const review = this.reviewFor(id, served?.item.review_status);
               return {
                 id,
                 isDraft: !served?.item.ready_for_review_at,

@@ -13,6 +13,12 @@ describe("demoSearchPullsForRepo", () => {
     expect(search("review-requested")).toEqual(search("review-requested"));
   });
 
+  it("includes approved and changes-requested PRs in the author view", () => {
+    const statuses = search("author").map((pr) => pr.review_status);
+
+    expect(statuses).toEqual(expect.arrayContaining(["approved", "changes-requested"]));
+  });
+
   it("user-review-requested drops team-only PRs that review-requested includes (#27)", () => {
     const withTeams = search("review-requested").map((pr) => pr.id);
     const directOnly = search("user-review-requested").map((pr) => pr.id);

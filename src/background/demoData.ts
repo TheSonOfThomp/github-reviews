@@ -78,11 +78,13 @@ function fakeCIStatus(): CIStatus | undefined {
   return undefined;
 }
 
-const demoReviewStatus = (id: number): ReviewStatus =>
-  ["approved", "awaiting-review", "changes-requested", "comments-pending"][hashInt(id) % 4] as ReviewStatus;
-
-function fakePRsForRepo(repo: string, count: number, authorLogin: string): DemoPull[] {
-  return Array.from({ length: count }, () => {
+function fakePRsForRepo(
+  repo: string,
+  count: number,
+  authorLogin: string,
+  reviewStatuses: ReviewStatus[] = []
+): DemoPull[] {
+  return Array.from({ length: count }, (_, index) => {
     const number = faker.number.int({ min: 100, max: 9999 });
     const created = new Date(
       (faker.defaultRefDate?.() ?? new Date()).getTime() -
@@ -93,6 +95,7 @@ function fakePRsForRepo(repo: string, count: number, authorLogin: string): DemoP
       id,
       node_id: `PR_node_${id}`,
       ci_status: fakeCIStatus(),
+      ...(reviewStatuses[index] ? { review_status: reviewStatuses[index] } : {}),
       number,
       title: faker.hacker.phrase(),
       html_url: `https://github.com/${repo}/pull/${number}`,
@@ -129,8 +132,9 @@ function demoAllPullsForRepo(repo: string, reviewerLogin: string): DemoPull[] {
     pulls.push({ ...pr, requested_reviewers: [...pr.requested_reviewers, { login: reviewerLogin }] });
   }
 
-  const mineCount = faker.number.int({ min: 1, max: 3 });
-  pulls.push(...fakePRsForRepo(repo, mineCount, DEMO_USERNAME));
+  // Always include these two author-side states so the demo and E2E popup
+  // show the review-status indicators without relying on random IDs.
+  pulls.push(...fakePRsForRepo(repo, 2, DEMO_USERNAME, ["approved", "changes-requested"]));
 
   const noiseCount = faker.number.int({ min: 0, max: 2 });
   pulls.push(...fakePRsForRepo(repo, noiseCount, faker.internet.username()));
@@ -183,7 +187,6 @@ export function demoSearchPullsForRepo(
           Date.parse(pr.created_at) + ((hash % 7) * 8) * 3_600_000
         ).toISOString();
       }
-      if (qualifier === "author") out.review_status = demoReviewStatus(pr.id);
       return out;
     });
 }
