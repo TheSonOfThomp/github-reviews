@@ -129,33 +129,51 @@ test(
   }
 );
 
-test("renders the cached list first, then revalidates in the background", async ({
+test("fresh cache survives popup reopen and tab switches; stale open and Refresh fetch both views", async ({
   openPopup,
   stub,
 }) => {
   const page = await openPopup();
   await seedSettings(page, SETTINGS);
   await page.reload();
+  await settledEntry(page, "review");
+  await expect.poll(async () => (await readCache(page))?.mine?.prs.length ?? 0).toBeGreaterThan(0);
+  const queries = stub.searchQueries.length;
 
-  const firstPr = page.locator("a[title^='#']").first();
-  await expect(firstPr).toBeVisible();
-  const cachedTitle = await firstPr.getAttribute("title");
-  expect(cachedTitle).toMatch(/^#\d+ /);
+  await page.getByRole("button", { name: "My Open PRs" }).click();
+  await settledEntry(page, "mine");
+  await page.getByRole("button", { name: "Review Requests" }).click();
+  await page.reload();
+  await settledEntry(page, "review");
+  expect(stub.searchQueries).toHaveLength(queries);
 
-  // Serve a different PR set next, and slow it down so the cached render is
-  // observable
   stub.generation++;
   stub.delayMs = 1500;
+  await page.evaluate(() => new Promise<void>((resolve) =>
+    chrome.storage.local.get(["prCache"], (stored) => {
+      const cache = stored.prCache as Record<string, CacheEntry>;
+      cache.review.fetchedAt = cache.mine.fetchedAt = Date.now() - 6 * 60_000;
+      chrome.storage.local.set({ prCache: cache }, resolve);
+    })
+  ));
+  await page.getByRole("button", { name: "My Open PRs" }).click();
+  await settledEntry(page, "mine");
+  expect(stub.searchQueries).toHaveLength(queries); // stale while open is still tab-only navigation
+  await page.getByRole("button", { name: "Review Requests" }).click();
+  await settledEntry(page, "review");
+  const cachedTitle = await page.locator("a[title^='#']").first().getAttribute("title");
   await page.reload();
-
-  // The previous fetch's cache entry paints immediately — well before the
-  // delayed fresh response can land (stale-while-revalidate)
   await expect(page.locator(`a[title="${cachedTitle}"]`)).toBeVisible({ timeout: 1000 });
+  await expect.poll(() => stub.searchQueries.length).toBe(queries + 2);
   stub.delayMs = 0;
+  await expect(page.locator("a[title^='#']").first()).not.toHaveAttribute("title", cachedTitle!, { timeout: 10_000 });
 
-  // Once the fresh response arrives (a new seeded batch) it replaces the
-  // cached content
-  await expect(firstPr).not.toHaveAttribute("title", cachedTitle!, { timeout: 10_000 });
+  const beforeRefresh = stub.searchQueries.length;
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect.poll(() => stub.searchQueries.length).toBe(beforeRefresh + 2);
+  await page.getByRole("button", { name: "My Open PRs" }).click();
+  await settledEntry(page, "mine");
+  expect(stub.searchQueries).toHaveLength(beforeRefresh + 2);
 });
 
 test(
