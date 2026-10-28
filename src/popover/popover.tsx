@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import "@primer/primitives/dist/css/functional/themes/light.css";
 import "@primer/primitives/dist/css/functional/themes/dark.css";
 import "@primer/css/dist/primer.css";
@@ -48,6 +48,8 @@ const filteredPullsUrl = (
   const q = `is:pr is:open ${qualifier}:${username || "@me"}`;
   return `https://github.com/${repo}/pulls?q=${encodeURIComponent(q)}`;
 };
+
+const FRESH_CACHE_MS = 5 * 60_000;
 
 const arraysEqual = (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
 
@@ -122,6 +124,8 @@ const CIStatusLink = ({ pr }: { pr: PullRequest }) => {
 export const PopoverContent = () => {
   const [state, setState] = useState<State>({ status: "loading" });
   const [refreshCount, setRefreshCount] = useState(0);
+  const lastRefresh = useRef(0);
+  const firstOpen = useRef(true);
   const [viewMode, setViewMode] = useState<ViewMode | null>(null);
   const [username, setUsername] = useState<string | null>(null);
   const [includeTeamRequests, setIncludeTeamRequests] = useState(DEFAULT_INCLUDE_TEAM_REQUESTS);
@@ -154,6 +158,11 @@ export const PopoverContent = () => {
 
   useEffect(() => {
     if (viewMode === null) return;
+    let cancelled = false;
+    const forceRefresh = refreshCount !== lastRefresh.current;
+    const checkStaleness = firstOpen.current;
+    firstOpen.current = false;
+    lastRefresh.current = refreshCount;
     setState({ status: "loading" });
     const syncDefaults = { githubToken: "", repos: [], includeTeamRequests: DEFAULT_INCLUDE_TEAM_REQUESTS, showWaitTime: DEFAULT_SHOW_WAIT_TIME, waitTimeSlaHours: DEFAULT_WAIT_TIME_SLA_HOURS };
     chrome.storage.sync.get(syncDefaults, (stored) => {
@@ -173,11 +182,11 @@ export const PopoverContent = () => {
         return;
       }
 
-      const action = viewMode === "review" ? "GET_PULL_REQUESTS" : "GET_MY_PULL_REQUESTS";
-
-      // Stale-while-revalidate: render a matching cache entry immediately, then
-      // let the fresh response below overwrite it once it lands
-      readCache(viewMode).then((cached) => {
+      // Render the selected list from cache. Switching views never initiates a
+      // fetch while both entries are fresh.
+      Promise.all([readCache("review"), readCache("mine")]).then(([review, mine]) => {
+        if (cancelled) return;
+        const cached = viewMode === "review" ? review : mine;
         if (cached && arraysEqual(cached.repos, stored.repos)) {
           setState({
             status: "done",
@@ -188,22 +197,29 @@ export const PopoverContent = () => {
           });
         }
 
-        chrome.runtime.sendMessage({ action }, (response) => {
-          if (chrome.runtime.lastError) {
-            setState({ status: "error", message: chrome.runtime.lastError.message ?? "Unknown error" });
+        const fresh = [review, mine].every((entry) =>
+          entry && arraysEqual(entry.repos, stored.repos) && Date.now() - entry.fetchedAt < FRESH_CACHE_MS
+        );
+        if (!forceRefresh && (!checkStaleness || fresh)) return;
+        chrome.runtime.sendMessage({ action: "GET_PULL_REQUESTS" }, (response) => {
+          if (cancelled) return;
+          if (chrome.runtime.lastError || !response) {
+            setState({ status: "error", message: chrome.runtime.lastError?.message ?? "Failed to refresh pull requests" });
             return;
           }
-          const prs = response?.payload ?? [];
+          const result = response[viewMode];
+          const prs = result.prs as PullRequest[];
           setState({
             status: "done",
             prs,
-            errors: response?.errors ?? [],
+            errors: result.errors,
             repos: stored.repos.length ? stored.repos : uniqueRepos(prs),
             fetchedAt: Date.now(),
           });
         });
       });
     });
+    return () => { cancelled = true; };
   }, [refreshCount, viewMode]);
 
   const handleRefresh = () => setRefreshCount((c) => c + 1);
