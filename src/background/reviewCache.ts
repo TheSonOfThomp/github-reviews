@@ -31,6 +31,12 @@ export function writeCache(key: CacheKey, entry: CacheEntry): Promise<void> {
   });
 }
 
+export function writeBothCaches(review: CacheEntry, mine: CacheEntry): Promise<void> {
+  return new Promise((resolve) =>
+    chrome.storage.local.set({ [CACHE_STORAGE_KEY]: { review, mine } }, () => resolve())
+  );
+}
+
 export function clearCache(): Promise<void> {
   return new Promise((resolve) => chrome.storage.local.remove(CACHE_STORAGE_KEY, () => resolve()));
 }
