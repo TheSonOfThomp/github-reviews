@@ -3,6 +3,7 @@ import type { Page } from "@playwright/test";
 import type { CacheEntry } from "../src/background/reviewCache";
 import { isPastSla, waitBasis, waitTimeLabel } from "../src/popover/waitTime";
 import { DEFAULT_WAIT_TIME_SLA_HOURS } from "../src/settings";
+import { sortPullRequests } from "../src/popover/sortPullRequests";
 
 const SETTINGS = { githubToken: "stub-token", repos: ["acme/widgets"] };
 
@@ -65,11 +66,13 @@ test(
 
     expect(entry.errors).toEqual([]);
     expect(entry.repos).toEqual(["acme/widgets"]);
+    expect(await page.locator("a[title^='#']").evaluateAll((links) => links.map((link) => link.getAttribute("href"))))
+      .toEqual(sortPullRequests(entry.prs, "review").slice(0, 10).map((pr) => pr.html_url));
     // The review view searched server-side for the demo user's review requests
     expect(entry.prs.length).toBeGreaterThan(0);
     expect(stub.searchQueries).toContain("repo:acme/widgets is:pr is:open review-requested:demo-user");
 
-    for (const pr of entry.prs.slice(0, 3)) {
+    for (const pr of sortPullRequests(entry.prs, "review").slice(0, 3)) {
       await expect(page.getByRole("link", { name: new RegExp(`^#${pr.number} `) })).toBeVisible();
       // Wait time shows the PR's basis — the earlier of ready-for-review and
       // the review request — with the basis event named in its hover text
@@ -86,6 +89,11 @@ test(
       );
       expect(title?.endsWith("past SLA")).toBe(isPastSla(basis.at, DEFAULT_WAIT_TIME_SLA_HOURS));
     }
+    // The deliberately old draft stays below newer ready requests.
+    const reviewOrder = sortPullRequests(entry.prs, "review");
+    const draftIndex = reviewOrder.findIndex((pr) => pr.title === "Draft — design in progress");
+    expect(draftIndex).toBeGreaterThan(0);
+    expect(reviewOrder.slice(0, draftIndex).some((pr) => !pr.draft)).toBe(true);
     // The demo age mix puts at least one PR past the SLA in every batch
     expect(entry.prs.some((pr) => isPastSla(waitBasis(pr).at, DEFAULT_WAIT_TIME_SLA_HOURS))).toBe(true);
 
@@ -93,7 +101,7 @@ test(
     // for PRs whose head commit has checks, each linking to the checks page
     expect(stub.graphqlIdBatches.length).toBeGreaterThan(0);
     expect(stub.graphqlIdBatches.every((ids) => ids.length <= 100)).toBe(true);
-    const visiblePrs = entry.prs.slice(0, 10);
+    const visiblePrs = sortPullRequests(entry.prs, "review").slice(0, 10);
     const withCI = visiblePrs.filter((pr) => pr.ci_status);
     expect(withCI.length).toBeGreaterThan(0);
     await expect(page.getByRole("link", { name: /^CI: / })).toHaveCount(withCI.length);
@@ -197,7 +205,16 @@ test(
     await page.getByRole("button", { name: "My Open PRs" }).click();
 
     const mine = await settledEntry(page, "mine");
+    expect(await page.locator("a[title^='#']").evaluateAll((links) => links.map((link) => link.getAttribute("href"))))
+      .toEqual(sortPullRequests(mine.prs, "mine").slice(0, 10).map((pr) => pr.html_url));
     await expect(page.locator(".wait-time")).toHaveCount(0);
+    expect(sortPullRequests(mine.prs, "mine").map((pr) => pr.title)).toEqual([
+      "Approved — ready to merge",
+      "Changes requested — update needed",
+      "Comments pending — follow up",
+      "Awaiting review — ready for feedback",
+      "Draft — approved but still in progress",
+    ]);
     // The real mine filter ran: every cached PR is authored by the demo user
     expect(mine.prs.every((pr) => pr.user.login === "demo-user")).toBe(true);
     // And it is a different set from the review view
@@ -205,11 +222,11 @@ test(
     expect(mine.prs.some((pr) => !reviewNumbers.has(pr.number))).toBe(true);
 
     // CI status icons appear in the My Open PRs view too (#32)
-    const mineWithCI = mine.prs.slice(0, 10).filter((pr) => pr.ci_status);
+    const mineWithCI = sortPullRequests(mine.prs, "mine").slice(0, 10).filter((pr) => pr.ci_status);
     expect(mineWithCI.length).toBeGreaterThan(0);
     await expect(page.getByRole("link", { name: /^CI: / })).toHaveCount(mineWithCI.length);
 
-    const mineWithReviewStatus = mine.prs.slice(0, 10).filter((pr) => pr.review_status);
+    const mineWithReviewStatus = sortPullRequests(mine.prs, "mine").slice(0, 10).filter((pr) => pr.review_status);
     expect(mineWithReviewStatus.length).toBeGreaterThan(0);
     await expect(page.getByRole("img", { name: /^Review status: / })).toHaveCount(mineWithReviewStatus.length);
     for (const label of [
@@ -219,8 +236,8 @@ test(
       "Review status: Comments pending",
     ]) {
       const icon = page.getByRole("img", { name: label });
-      await expect(icon).toHaveCount(1);
-      await expect(icon).toHaveAttribute("title", label);
+      await expect(icon).toHaveCount(label === "Review status: Approved" ? 2 : 1);
+      await expect(icon.first()).toHaveAttribute("title", label);
     }
   }
 );
@@ -266,7 +283,7 @@ test(
     for (const pr of teamOnly) {
       await expect(page.getByRole("link", { name: new RegExp(`^#${pr.number} `) })).toBeHidden();
     }
-    for (const pr of directOnly.prs.slice(0, 3)) {
+    for (const pr of sortPullRequests(directOnly.prs, "review").slice(0, 3)) {
       await expect(page.getByRole("link", { name: new RegExp(`^#${pr.number} `) })).toBeVisible();
     }
     // The repo header's GitHub link applies the same filter (#21)

@@ -13,12 +13,31 @@ describe("demoSearchPullsForRepo", () => {
     expect(search("review-requested")).toEqual(search("review-requested"));
   });
 
-  it("includes every review status in the author view", () => {
-    const statuses = search("author").map((pr) => pr.review_status);
+  it("makes every status tier visible and keeps an approved draft for the author screenshot", () => {
+    const prs = search("author");
+    expect(prs.map((pr) => [pr.review_status, pr.draft])).toEqual([
+      ["awaiting-review", false],
+      ["comments-pending", false],
+      ["approved", false],
+      ["changes-requested", false],
+      ["approved", true],
+    ]);
+    expect(prs.map((pr) => pr.title)).toEqual([
+      "Awaiting review — ready for feedback",
+      "Comments pending — follow up",
+      "Approved — ready to merge",
+      "Changes requested — update needed",
+      "Draft — approved but still in progress",
+    ]);
+  });
 
-    expect(statuses).toEqual(
-      expect.arrayContaining(["approved", "awaiting-review", "changes-requested", "comments-pending"])
-    );
+  it("includes an older draft alongside ready review requests", () => {
+    const prs = search("user-review-requested");
+    expect(prs.length).toBeGreaterThanOrEqual(3);
+    expect(prs[0].draft).toBe(true);
+    expect(prs[0].title).toBe("Draft — design in progress");
+    expect(prs.slice(1).every((pr) => !pr.draft)).toBe(true);
+    expect(Date.parse(prs[0].created_at)).toBeLessThan(Date.parse(prs[1].created_at));
   });
 
   it("user-review-requested drops team-only PRs that review-requested includes (#27)", () => {
