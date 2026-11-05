@@ -126,21 +126,36 @@ function demoAllPullsForRepo(repo: string, reviewerLogin: string): DemoPull[] {
   demoPrAgeIndex = 0;
   const pulls: DemoPull[] = [];
 
-  const reviewCount = faker.number.int({ min: 1, max: 5 });
+  const reviewCount = faker.number.int({ min: 3, max: 5 });
   for (let i = 0; i < reviewCount; i++) {
     const [pr] = fakePRsForRepo(repo, 1, faker.internet.username());
-    pulls.push({ ...pr, requested_reviewers: [...pr.requested_reviewers, { login: reviewerLogin }] });
+    pulls.push({
+      ...pr,
+      // The oldest request stays in draft, making the sort visible even when
+      // its wait exceeds the ready PRs' waits.
+      draft: i === 0,
+      title: i === 0 ? "Draft — design in progress" : pr.title,
+      requested_reviewers: [...pr.requested_reviewers, { login: reviewerLogin }],
+    });
   }
 
-  // Always include every author-side state so the demo and E2E popup show
-  // each review-status indicator without relying on random IDs.
+  // Source order intentionally differs from priority order; the screenshot
+  // shows both the status tiers and an approved draft falling to the bottom.
+  const authorTitles = [
+    "Awaiting review — ready for feedback",
+    "Comments pending — follow up",
+    "Approved — ready to merge",
+    "Changes requested — update needed",
+    "Draft — approved but still in progress",
+  ];
   pulls.push(
-    ...fakePRsForRepo(repo, 4, DEMO_USERNAME, [
-      "approved",
+    ...fakePRsForRepo(repo, 5, DEMO_USERNAME, [
       "awaiting-review",
-      "changes-requested",
       "comments-pending",
-    ])
+      "approved",
+      "changes-requested",
+      "approved",
+    ]).map((pr, index) => ({ ...pr, draft: index === 4, title: authorTitles[index] }))
   );
 
   const noiseCount = faker.number.int({ min: 0, max: 2 });

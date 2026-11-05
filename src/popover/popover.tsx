@@ -18,6 +18,7 @@ import type { CIStatus, PullRequest, RepoError, ReviewStatus } from "../backgrou
 import { readCache } from "../background/reviewCache";
 import { DEFAULT_INCLUDE_TEAM_REQUESTS, DEFAULT_SHOW_WAIT_TIME, DEFAULT_WAIT_TIME_SLA_HOURS } from "../settings";
 import { isPastSla, waitBasis, waitTimeLabel, waitTimeTitle } from "./waitTime";
+import { sortPullRequests } from "./sortPullRequests";
 
 type State =
   | { status: "loading" }
@@ -368,7 +369,7 @@ const PullRequestList = ({
   showWaitTime: boolean;
   waitTimeSlaHours: number;
 }) => {
-  const byRepo = prs.reduce<Record<string, PullRequest[]>>((acc, pr) => {
+  const byRepo = sortPullRequests(prs, viewMode).reduce<Record<string, PullRequest[]>>((acc, pr) => {
     (acc[pr.repo] ??= []).push(pr);
     return acc;
   }, {});
