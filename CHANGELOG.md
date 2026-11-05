@@ -1,5 +1,11 @@
 # chrome-extension
 
+## 0.4.2
+
+### Patch Changes
+
+- 5a5f418: Sort review requests by longest wait and authored PRs by review status, keeping drafts last in both views.
+
 ## 0.4.1
 
 ### Patch Changes
